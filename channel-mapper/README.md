@@ -47,25 +47,32 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 ## GUI Layout
 
 ```
-+------------------+----------------------------------------------------+
-| Channel List     | Set 1 [→]  Set 2 [→]  Set 3 [→]  ...  Set 6 [→]   |
-| (from Chrome)    | [DefName] [Name]   ...                              |
-|                  | [Prog #]  [VirtCh]                                  |
-| [Load]           |                                                      |
-|                  | Set 7 [→]  Set 8 [→]  ...                           |
-| ☐ Channel 1      |                                                      |
-| ☐ Channel 2      |     (6 columns x 10 rows = 60 sets)                 |
-| ☐ Channel 3      |                                                      |
-| ...              |                                                      |
-|                  | [Config Device]                                      |
-+------------------+----------------------------------------------------+
++-------------------------+----------------------------------------------+
+| Channel List            | ESPN [→]       CNN [→]       Set 3 [→]  ... |
+| (from Chrome)           | [Name] [Prog#] [VCh]                         |
+|                         |                                              |
+| [Load]                  | Set 5 [→]      Set 6 [→]     ...             |
+|                         |                                              |
+| ☐ Channel 1             |     (4 columns x 15 rows = 60 sets)          |
+| ☐ Channel 2             |                                              |
+| ☐ Channel 3             |                                              |
+| ...                     |                                              |
+|                         | [Config Device]                              |
+| [Remove Duplicates]     |                                              |
+| [Remove Freq 999000]    |                                              |
++-------------------------+----------------------------------------------+
 ```
 
 ## Edit Box Layout per Set
 
-Each set contains 4 edit boxes:
-- **Row 1**: Default Name (read-only, from INI) | Name (editable, filled by arrow)
-- **Row 2**: Program # (editable, filled by arrow) | Virtual Channel (read-only, from INI)
+Each set contains:
+- **Row 1**: Label (INI name or "Set X") | Arrow button (→)
+- **Row 2**: Name (editable) | Program # (editable) | Virtual Channel (read-only, from INI)
+
+## Filter Buttons
+
+- **Remove Duplicates**: Removes channels with duplicate names, keeping the one with the lowest program number
+- **Remove Freq 999000**: Removes all channels with frequency 999000
 
 ## Accessing the Map
 
