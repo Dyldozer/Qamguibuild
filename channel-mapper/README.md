@@ -6,6 +6,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 
 - `ChannelMapper.ahk` - Main script (requires UIA-v2 library)
 - `ChannelMapper_Standalone.ahk` - Standalone version with built-in UIA (no external library needed)
+- `ChannelSetIO.ahk` - Save/Load functionality (included by main scripts)
 - `ChannelSets.ini` - Configuration file for the 60 channel sets
 - `ChannelSets_Example.ini` - Example configuration with sample data
 
@@ -79,6 +80,23 @@ Each set contains:
 
 - **Remove Duplicates**: Removes channels with duplicate names, keeping the one with the lowest program number
 - **Remove Freq 999000**: Removes all channels with frequency 999000
+
+## Save/Load Assignments
+
+- **Save Assignments**: Saves all channel assignment sets to a text file
+- **Load Assignments**: Loads channel assignments from a previously saved file
+- **Clear All**: Clears all channel assignments (with confirmation)
+
+Saved file format:
+```
+Set1=Channel Name|Program Number|Virtual Channel
+Set5=ESPN|1234|101
+```
+
+## Right-Click to Copy
+
+- Right-click any row in the ListView to copy the channel name to clipboard
+- A tooltip confirms the copied name
 
 ## Accessing the Map
 
