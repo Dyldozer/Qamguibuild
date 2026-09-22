@@ -5,6 +5,9 @@
 ; Download from: https://github.com/Descolada/UIA-v2
 #Include <UIA>
 
+; Include save/load functionality
+#Include "ChannelSetIO.ahk"
+
 ; Global variables
 global ChannelList := []
 global FullChannelList := []
@@ -45,8 +48,9 @@ Main() {
     SearchEdit := MainGui.AddEdit("x+5 yp-2 w345 h22")
     SearchEdit.OnEvent("Change", OnSearchChange)
     
-    LV := MainGui.AddListView("xm y55 w400 h525 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
+    LV := MainGui.AddListView("xm y55 w400 h495 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
     LV.OnEvent("ItemCheck", OnItemCheck)
+    SetupListViewRightClick(LV)
     
     ; Set column widths
     LV.ModifyCol(1, 70)
@@ -55,11 +59,21 @@ Main() {
     LV.ModifyCol(4, 80)
     
     ; Buttons below ListView
-    RemoveDupBtn := MainGui.AddButton("xm y590 w195 h26", "Remove Duplicates")
+    RemoveDupBtn := MainGui.AddButton("xm y560 w195 h26", "Remove Duplicates")
     RemoveDupBtn.OnEvent("Click", RemoveDuplicates)
     
     Remove999Btn := MainGui.AddButton("x+10 yp w195 h26", "Remove Freq 999000")
     Remove999Btn.OnEvent("Click", RemoveFreq999000)
+    
+    ; Save/Load buttons
+    SaveBtn := MainGui.AddButton("xm y590 w130 h26", "Save Assignments")
+    SaveBtn.OnEvent("Click", SaveChannelSets)
+    
+    LoadBtn2 := MainGui.AddButton("x+5 yp w130 h26", "Load Assignments")
+    LoadBtn2.OnEvent("Click", LoadChannelSets)
+    
+    ClearBtn := MainGui.AddButton("x+5 yp w130 h26", "Clear All")
+    ClearBtn.OnEvent("Click", ClearAllChannelSets)
     
     ; Right panel - 60 channel sets (4 columns x 15 rows)
     MainGui.AddText("x420 y5 w700 h20 Center", "Channel Assignment Sets")
