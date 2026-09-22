@@ -7,15 +7,18 @@
 
 ; Global variables
 global ChannelList := []
+global FullChannelList := []
 global ChannelSets := []
 global ProgramChannelMap := Map()
 global CurrentCheckedRow := 0
+global CheckedChannel := ""
 
 ; GUI Controls references
 global MainGui := ""
 global LV := ""
 global LoadBtn := ""
 global ConfigBtn := ""
+global SearchEdit := ""
 
 ; Initialize and show GUI
 Main()
@@ -37,7 +40,12 @@ Main() {
     LoadBtn := MainGui.AddButton("x+10 yp-3 w80 h26", "Load")
     LoadBtn.OnEvent("Click", LoadChannels)
     
-    LV := MainGui.AddListView("xm y30 w400 h550 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
+    ; Search box
+    MainGui.AddText("xm y32 w50 h20", "Search:")
+    SearchEdit := MainGui.AddEdit("x+5 yp-2 w345 h22")
+    SearchEdit.OnEvent("Change", OnSearchChange)
+    
+    LV := MainGui.AddListView("xm y55 w400 h525 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
     LV.OnEvent("ItemCheck", OnItemCheck)
     
     ; Set column widths
@@ -170,12 +178,15 @@ CreateDefaultINI(path) {
 }
 
 LoadChannels(*) {
-    global ChannelList, LV, CurrentCheckedRow
+    global ChannelList, FullChannelList, LV, CurrentCheckedRow, CheckedChannel, SearchEdit
     
     ; Clear existing items
     LV.Delete()
     ChannelList := []
+    FullChannelList := []
     CurrentCheckedRow := 0
+    CheckedChannel := ""
+    SearchEdit.Value := ""
     
     ; Use UIA to get channels from Chrome
     try {
@@ -183,6 +194,7 @@ LoadChannels(*) {
         
         for channel in channels {
             ChannelList.Push(channel)
+            FullChannelList.Push(channel)
             LV.Add("", channel.Channel, channel.ProgramNum, channel.Name, channel.Frequency)
         }
         
@@ -193,86 +205,121 @@ LoadChannels(*) {
     }
 }
 
-RemoveDuplicates(*) {
-    global ChannelList, LV, CurrentCheckedRow
+OnSearchChange(*) {
+    global ChannelList, FullChannelList, LV, CurrentCheckedRow, CheckedChannel, SearchEdit
     
-    if (ChannelList.Length = 0) {
+    searchText := SearchEdit.Value
+    
+    ; Clear current selection
+    CurrentCheckedRow := 0
+    CheckedChannel := ""
+    
+    ; Filter the list
+    LV.Delete()
+    ChannelList := []
+    
+    for channel in FullChannelList {
+        if (searchText = "" || InStr(channel.Name, searchText, false)) {
+            ChannelList.Push(channel)
+            LV.Add("", channel.Channel, channel.ProgramNum, channel.Name, channel.Frequency)
+        }
+    }
+}
+
+RemoveDuplicates(*) {
+    global ChannelList, FullChannelList, LV, CurrentCheckedRow, CheckedChannel, SearchEdit
+    
+    if (FullChannelList.Length = 0) {
         MsgBox("No channels loaded.", "Remove Duplicates", "Icon!")
         return
     }
     
     ; Build a map of name -> channel with lowest program number
     nameMap := Map()
-    for channel in ChannelList {
+    for channel in FullChannelList {
         name := channel.Name
         if (!nameMap.Has(name) || Integer(channel.ProgramNum) < Integer(nameMap[name].ProgramNum)) {
             nameMap[name] := channel
         }
     }
     
-    ; Rebuild channel list with unique names
-    originalCount := ChannelList.Length
-    ChannelList := []
+    ; Rebuild full channel list with unique names
+    originalCount := FullChannelList.Length
+    FullChannelList := []
     for name, channel in nameMap {
-        ChannelList.Push(channel)
+        FullChannelList.Push(channel)
     }
     
     ; Sort by program number
-    SortChannelsByProgram()
+    SortChannelsByProgram(FullChannelList)
+    
+    ; Clear search and refresh
+    SearchEdit.Value := ""
+    ChannelList := []
+    for channel in FullChannelList {
+        ChannelList.Push(channel)
+    }
     
     ; Refresh ListView
     LV.Delete()
     CurrentCheckedRow := 0
+    CheckedChannel := ""
     for channel in ChannelList {
         LV.Add("", channel.Channel, channel.ProgramNum, channel.Name, channel.Frequency)
     }
     
-    removed := originalCount - ChannelList.Length
-    MsgBox("Removed " removed " duplicate channels.`nRemaining: " ChannelList.Length, "Remove Duplicates", "Iconi")
+    removed := originalCount - FullChannelList.Length
+    MsgBox("Removed " removed " duplicate channels.`nRemaining: " FullChannelList.Length, "Remove Duplicates", "Iconi")
 }
 
 RemoveFreq999000(*) {
-    global ChannelList, LV, CurrentCheckedRow
+    global ChannelList, FullChannelList, LV, CurrentCheckedRow, CheckedChannel, SearchEdit
     
-    if (ChannelList.Length = 0) {
+    if (FullChannelList.Length = 0) {
         MsgBox("No channels loaded.", "Remove Frequency 999000", "Icon!")
         return
     }
     
-    ; Filter out channels with frequency 999000
-    originalCount := ChannelList.Length
+    ; Filter out channels with frequency 999000 from full list
+    originalCount := FullChannelList.Length
     newList := []
-    for channel in ChannelList {
+    for channel in FullChannelList {
         if (channel.Frequency != "999000") {
             newList.Push(channel)
         }
     }
-    ChannelList := newList
+    FullChannelList := newList
+    
+    ; Clear search and refresh
+    SearchEdit.Value := ""
+    ChannelList := []
+    for channel in FullChannelList {
+        ChannelList.Push(channel)
+    }
     
     ; Refresh ListView
     LV.Delete()
     CurrentCheckedRow := 0
+    CheckedChannel := ""
     for channel in ChannelList {
         LV.Add("", channel.Channel, channel.ProgramNum, channel.Name, channel.Frequency)
     }
     
-    removed := originalCount - ChannelList.Length
-    MsgBox("Removed " removed " channels with frequency 999000.`nRemaining: " ChannelList.Length, "Remove Frequency 999000", "Iconi")
+    removed := originalCount - FullChannelList.Length
+    MsgBox("Removed " removed " channels with frequency 999000.`nRemaining: " FullChannelList.Length, "Remove Frequency 999000", "Iconi")
 }
 
-SortChannelsByProgram() {
-    global ChannelList
-    
+SortChannelsByProgram(arr) {
     ; Simple bubble sort by program number
-    n := ChannelList.Length
+    n := arr.Length
     Loop n - 1 {
         i := A_Index
         Loop n - i {
             j := A_Index
-            if (Integer(ChannelList[j].ProgramNum) > Integer(ChannelList[j + 1].ProgramNum)) {
-                temp := ChannelList[j]
-                ChannelList[j] := ChannelList[j + 1]
-                ChannelList[j + 1] := temp
+            if (Integer(arr[j].ProgramNum) > Integer(arr[j + 1].ProgramNum)) {
+                temp := arr[j]
+                arr[j] := arr[j + 1]
+                arr[j + 1] := temp
             }
         }
     }
@@ -384,7 +431,7 @@ ParseChannelString(str) {
 }
 
 OnItemCheck(LV, rowNum, checked) {
-    global CurrentCheckedRow
+    global CurrentCheckedRow, CheckedChannel
     
     if (checked) {
         ; Uncheck previous row if different
@@ -392,30 +439,36 @@ OnItemCheck(LV, rowNum, checked) {
             LV.Modify(CurrentCheckedRow, "-Check")
         }
         CurrentCheckedRow := rowNum
+        
+        ; Store the actual channel data from the ListView row (handles sorting)
+        CheckedChannel := {}
+        CheckedChannel.Channel := LV.GetText(rowNum, 1)
+        CheckedChannel.ProgramNum := LV.GetText(rowNum, 2)
+        CheckedChannel.Name := LV.GetText(rowNum, 3)
+        CheckedChannel.Frequency := LV.GetText(rowNum, 4)
     } else {
-        if (CurrentCheckedRow = rowNum)
+        if (CurrentCheckedRow = rowNum) {
             CurrentCheckedRow := 0
+            CheckedChannel := ""
+        }
     }
 }
 
 ArrowClick(setIndex, *) {
-    global ChannelList, ChannelSets, CurrentCheckedRow, LV
+    global ChannelSets, CurrentCheckedRow, CheckedChannel
     
     ; Check if a channel is selected
-    if (CurrentCheckedRow = 0) {
+    if (CurrentCheckedRow = 0 || CheckedChannel = "") {
         MsgBox("Please check a channel in the list first.", "No Channel Selected", "Icon!")
         return
     }
     
-    ; Get the checked channel
-    channel := ChannelList[CurrentCheckedRow]
-    
     ; Find the target set
     for set in ChannelSets {
         if (set.Index = setIndex) {
-            ; Update the Name and Program # edit boxes
-            set.NameEdit.Value := channel.Name
-            set.ProgramEdit.Value := channel.ProgramNum
+            ; Update the Name and Program # edit boxes using stored channel data
+            set.NameEdit.Value := CheckedChannel.Name
+            set.ProgramEdit.Value := CheckedChannel.ProgramNum
             break
         }
     }

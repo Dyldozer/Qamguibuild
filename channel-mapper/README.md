@@ -69,6 +69,12 @@ Each set contains:
 - **Row 1**: Label (INI name or "Set X") | Arrow button (→)
 - **Row 2**: Name (editable) | Program # (editable) | Virtual Channel (read-only, from INI)
 
+## Search Box
+
+- Type in the search box to filter channels by name (case-insensitive)
+- Filters as you type
+- Clear the search box to restore the full list
+
 ## Filter Buttons
 
 - **Remove Duplicates**: Removes channels with duplicate names, keeping the one with the lowest program number
