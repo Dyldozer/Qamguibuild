@@ -37,7 +37,7 @@ Main() {
     LoadBtn := MainGui.AddButton("x+10 yp-3 w80 h26", "Load")
     LoadBtn.OnEvent("Click", LoadChannels)
     
-    LV := MainGui.AddListView("xm y30 w400 h600 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
+    LV := MainGui.AddListView("xm y30 w400 h550 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
     LV.OnEvent("ItemCheck", OnItemCheck)
     
     ; Set column widths
@@ -46,21 +46,28 @@ Main() {
     LV.ModifyCol(3, 150)
     LV.ModifyCol(4, 80)
     
-    ; Right panel - 60 channel sets (6 columns x 10 rows)
-    MainGui.AddText("x420 y5 w900 h20 Center", "Channel Assignment Sets")
+    ; Buttons below ListView
+    RemoveDupBtn := MainGui.AddButton("xm y590 w195 h26", "Remove Duplicates")
+    RemoveDupBtn.OnEvent("Click", RemoveDuplicates)
+    
+    Remove999Btn := MainGui.AddButton("x+10 yp w195 h26", "Remove Freq 999000")
+    Remove999Btn.OnEvent("Click", RemoveFreq999000)
+    
+    ; Right panel - 60 channel sets (4 columns x 15 rows)
+    MainGui.AddText("x420 y5 w700 h20 Center", "Channel Assignment Sets")
     
     ; Create 60 sets of edit boxes
     startX := 420
     startY := 30
-    setWidth := 150
-    setHeight := 58
+    setWidth := 170
+    setHeight := 42
     colGap := 5
-    rowGap := 3
+    rowGap := 2
     
     Loop 60 {
         setIndex := A_Index
-        col := Mod(setIndex - 1, 6)
-        row := (setIndex - 1) // 6
+        col := Mod(setIndex - 1, 4)
+        row := (setIndex - 1) // 4
         
         x := startX + (col * (setWidth + colGap))
         y := startY + (row * (setHeight + rowGap))
@@ -70,11 +77,11 @@ Main() {
     }
     
     ; Config Device button at bottom
-    ConfigBtn := MainGui.AddButton("x420 y" (startY + (10 * (setHeight + rowGap)) + 10) " w150 h30", "Config Device")
+    ConfigBtn := MainGui.AddButton("x420 y" (startY + (15 * (setHeight + rowGap)) + 10) " w150 h30", "Config Device")
     ConfigBtn.OnEvent("Click", ConfigDevice)
     
     ; Show GUI
-    MainGui.Show("w1350 h680")
+    MainGui.Show("w1130 h700")
 }
 
 CreateChannelSet(index, x, y, width, height) {
@@ -94,26 +101,22 @@ CreateChannelSet(index, x, y, width, height) {
         }
     }
     
-    ; Row 1: Set number label and Arrow button
-    labelText := "Set " index
-    MainGui.AddText("x" x " y" y " w30 h16 +0x200", labelText)
+    ; Row 1: Label (INI name or "Set X") and Arrow button
+    labelText := (defaultName != "") ? defaultName : "Set " index
+    MainGui.AddText("x" x " y" y " w" (width - 28) " h16 +0x200", labelText)
     
-    arrowBtn := MainGui.AddButton("x" (x + 32) " yp-2 w20 h20", "→")
+    arrowBtn := MainGui.AddButton("x" (x + width - 25) " yp-2 w25 h20", "→")
     arrowBtn.OnEvent("Click", ArrowClick.Bind(index))
     set.ArrowBtn := arrowBtn
     
-    ; Row 2: Default Name (read-only) and Name
-    defNameEdit := MainGui.AddEdit("x" x " y" (y + 18) " w70 h20 ReadOnly", defaultName)
-    set.DefaultNameEdit := defNameEdit
-    
-    nameEdit := MainGui.AddEdit("x" (x + 75) " yp w70 h20", "")
+    ; Row 2: Name and Program #
+    nameEdit := MainGui.AddEdit("x" x " y" (y + 20) " w80 h20", "")
     set.NameEdit := nameEdit
     
-    ; Row 3: Program # and Virtual Channel
-    progEdit := MainGui.AddEdit("x" x " y" (y + 40) " w70 h20", "")
+    progEdit := MainGui.AddEdit("x" (x + 85) " yp w40 h20", "")
     set.ProgramEdit := progEdit
     
-    vchEdit := MainGui.AddEdit("x" (x + 75) " yp w70 h20 ReadOnly", virtualChannel)
+    vchEdit := MainGui.AddEdit("x" (x + 130) " yp w35 h20 ReadOnly", virtualChannel)
     set.VirtualChannelEdit := vchEdit
     
     ; Store set info
@@ -187,6 +190,91 @@ LoadChannels(*) {
             MsgBox("No channels found. Make sure Chrome is open with the channel selector visible.", "Load Channels", "Icon!")
     } catch as e {
         MsgBox("Error loading channels: " e.Message "`n`nMake sure:`n1. UIA.ahk library is in Lib folder`n2. Chrome is open with the channel selector visible", "Error", "Icon!")
+    }
+}
+
+RemoveDuplicates(*) {
+    global ChannelList, LV, CurrentCheckedRow
+    
+    if (ChannelList.Length = 0) {
+        MsgBox("No channels loaded.", "Remove Duplicates", "Icon!")
+        return
+    }
+    
+    ; Build a map of name -> channel with lowest program number
+    nameMap := Map()
+    for channel in ChannelList {
+        name := channel.Name
+        if (!nameMap.Has(name) || Integer(channel.ProgramNum) < Integer(nameMap[name].ProgramNum)) {
+            nameMap[name] := channel
+        }
+    }
+    
+    ; Rebuild channel list with unique names
+    originalCount := ChannelList.Length
+    ChannelList := []
+    for name, channel in nameMap {
+        ChannelList.Push(channel)
+    }
+    
+    ; Sort by program number
+    SortChannelsByProgram()
+    
+    ; Refresh ListView
+    LV.Delete()
+    CurrentCheckedRow := 0
+    for channel in ChannelList {
+        LV.Add("", channel.Channel, channel.ProgramNum, channel.Name, channel.Frequency)
+    }
+    
+    removed := originalCount - ChannelList.Length
+    MsgBox("Removed " removed " duplicate channels.`nRemaining: " ChannelList.Length, "Remove Duplicates", "Iconi")
+}
+
+RemoveFreq999000(*) {
+    global ChannelList, LV, CurrentCheckedRow
+    
+    if (ChannelList.Length = 0) {
+        MsgBox("No channels loaded.", "Remove Frequency 999000", "Icon!")
+        return
+    }
+    
+    ; Filter out channels with frequency 999000
+    originalCount := ChannelList.Length
+    newList := []
+    for channel in ChannelList {
+        if (channel.Frequency != "999000") {
+            newList.Push(channel)
+        }
+    }
+    ChannelList := newList
+    
+    ; Refresh ListView
+    LV.Delete()
+    CurrentCheckedRow := 0
+    for channel in ChannelList {
+        LV.Add("", channel.Channel, channel.ProgramNum, channel.Name, channel.Frequency)
+    }
+    
+    removed := originalCount - ChannelList.Length
+    MsgBox("Removed " removed " channels with frequency 999000.`nRemaining: " ChannelList.Length, "Remove Frequency 999000", "Iconi")
+}
+
+SortChannelsByProgram() {
+    global ChannelList
+    
+    ; Simple bubble sort by program number
+    n := ChannelList.Length
+    Loop n - 1 {
+        i := A_Index
+        Loop n - i {
+            j := A_Index
+            if (Integer(ChannelList[j].ProgramNum) > Integer(ChannelList[j + 1].ProgramNum)) {
+                temp := ChannelList[j]
+                ChannelList[j] := ChannelList[j + 1]
+                ChannelList[j + 1] := temp
+            }
+        }
     }
 }
 
