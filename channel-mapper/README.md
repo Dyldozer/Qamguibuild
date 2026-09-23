@@ -7,6 +7,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 - `ChannelMapper.ahk` - Main script (requires UIA-v2 library)
 - `ChannelMapper_Standalone.ahk` - Standalone version with built-in UIA (no external library needed)
 - `ChannelSetIO.ahk` - Save/Load functionality (included by main scripts)
+- `ChannelAlias.ahk` - Config editor and alias matching (included by main scripts)
 - `ChannelSets.ini` - Configuration file for the 60 channel sets
 - `ChannelSets_Example.ini` - Example configuration with sample data
 
@@ -25,12 +26,14 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 
 ## Usage
 
-1. **Configure the INI file**: Edit `ChannelSets.ini` to set the default names and virtual channels for each of the 60 sets:
+1. **Configure the INI file**: Use **Edit Config** in the app, or edit `ChannelSets.ini`, to set the name, virtual channel, and aliases for each of the 60 sets:
    ```ini
    [Set1]
    Name=ESPN
    VirtualChannel=101
+   Aliases=ESPN HD|ESPN-E
    ```
+   `Name` is the label on the set and is always treated as an alias. `Aliases` lists other names that channel may use, separated by `|`.
 
 2. **Open Chrome**: Navigate to the page with the `channel_selector` element
 
@@ -42,6 +45,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
    - Check (tick) a channel in the ListView (only one can be checked at a time)
    - Click the arrow button (→) next to any set to assign that channel
    - The channel name and program number will be copied to that set
+   - Or click **Match Aliases** to fuzzy-match the visible channel names against each set's name and aliases, then accept the suggestions you want
 
 6. **Configure device**: Click "Config Device" to create a map of Program # → Virtual Channel
 
@@ -58,9 +62,9 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 | ☐ Channel 2             |                                              |
 | ☐ Channel 3             |                                              |
 | ...                     |                                              |
-|                         | [Config Device]                              |
 | [Remove Duplicates]     |                                              |
 | [Remove Freq 999000]    |                                              |
+| [Match Aliases]         | [Config Device]  [Edit Config]               |
 +-------------------------+----------------------------------------------+
 ```
 
@@ -68,7 +72,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 
 Each set contains:
 - **Row 1**: Label (INI name or "Set X") | Arrow button (→)
-- **Row 2**: Name (editable) | Program # (editable) | Virtual Channel (read-only, from INI)
+- **Row 2**: Name (editable) | Program # (editable) | Virtual Channel (read-only, from INI; change it with Edit Config)
 
 ## Search Box
 
@@ -80,6 +84,27 @@ Each set contains:
 
 - **Remove Duplicates**: Removes channels with duplicate names, keeping the one with the lowest program number
 - **Remove Freq 999000**: Removes all channels with frequency 999000
+- **Match Aliases**: Fuzzy-matches the channel names currently shown in the list against each set's name and aliases
+
+## Edit Config
+
+**Edit Config** opens a window for all 60 sets. Select a set and edit:
+
+- **Name** — the label shown on the set
+- **Virtual Channel** — the virtual channel used by Config Device
+- **Aliases** — other names this channel may appear as, one per line
+
+Save writes `ChannelSets.ini` and updates the labels and virtual channels on the main window. Assignments already typed into the name and program boxes are left as they are.
+
+## Match Aliases
+
+**Match Aliases** compares every channel currently visible in the list (including an active search) with each set's name and aliases.
+
+- Punctuation and wording such as HD, East, or TV are ignored, so `ESPN HD` can match a set named `ESPN`
+- Small typos can match, but they are left unchecked so you can review them
+- Different station numbers are not treated as the same channel (`ESPN` does not match `ESPN2`, and channel 5 does not match channel 7). Put the full name in the alias list when the number is part of the name
+
+The suggestion window lists the best match for each set, with the matched alias and score. Strong matches for sets that do not already have an assignment start checked. Check or uncheck rows, then **Accept Checked** to copy the channel name and program number into those sets (the same result as the arrow button).
 
 ## Save/Load Assignments
 
