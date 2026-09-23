@@ -7,6 +7,7 @@
 
 ; Include save/load functionality
 #Include "ChannelSetIO.ahk"
+#Include "ChannelAlias.ahk"
 
 ; Global variables
 global ChannelList := []
@@ -48,7 +49,7 @@ Main() {
     SearchEdit := MainGui.AddEdit("x+5 yp-2 w345 h22")
     SearchEdit.OnEvent("Change", OnSearchChange)
     
-    LV := MainGui.AddListView("xm y55 w400 h495 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
+    LV := MainGui.AddListView("xm y55 w400 h593 Checked -Multi", ["Channel", "Program #", "Name", "Frequency"])
     LV.OnEvent("ItemCheck", OnItemCheck)
     SetupListViewRightClick(LV)
     
@@ -59,14 +60,14 @@ Main() {
     LV.ModifyCol(4, 80)
     
     ; Buttons below ListView
-    RemoveDupBtn := MainGui.AddButton("xm y560 w195 h26", "Remove Duplicates")
+    RemoveDupBtn := MainGui.AddButton("xm y656 w195 h26", "Remove Duplicates")
     RemoveDupBtn.OnEvent("Click", RemoveDuplicates)
     
     Remove999Btn := MainGui.AddButton("x+10 yp w195 h26", "Remove Freq 999000")
     Remove999Btn.OnEvent("Click", RemoveFreq999000)
     
     ; Save/Load buttons
-    SaveBtn := MainGui.AddButton("xm y590 w130 h26", "Save Assignments")
+    SaveBtn := MainGui.AddButton("xm y686 w130 h26", "Save Assignments")
     SaveBtn.OnEvent("Click", SaveChannelSets)
     
     LoadBtn2 := MainGui.AddButton("x+5 yp w130 h26", "Load Assignments")
@@ -74,6 +75,9 @@ Main() {
     
     ClearBtn := MainGui.AddButton("x+5 yp w130 h26", "Clear All")
     ClearBtn.OnEvent("Click", ClearAllChannelSets)
+
+    MatchAliasBtn := MainGui.AddButton("xm y716 w400 h26", "Match Aliases")
+    MatchAliasBtn.OnEvent("Click", SuggestAliasMatches)
     
     ; Right panel - 60 channel sets (4 columns x 15 rows)
     MainGui.AddText("x420 y5 w700 h20 Center", "Channel Assignment Sets")
@@ -98,12 +102,16 @@ Main() {
         CreateChannelSet(setIndex, x, y, setWidth, setHeight)
     }
     
-    ; Config Device button at bottom
-    ConfigBtn := MainGui.AddButton("x420 y" (startY + (15 * (setHeight + rowGap)) + 10) " w150 h30", "Config Device")
+    ; Config buttons at the bottom of the set grid
+    configY := startY + (15 * (setHeight + rowGap)) + 10
+    ConfigBtn := MainGui.AddButton("x420 y" configY " w150 h30", "Config Device")
     ConfigBtn.OnEvent("Click", ConfigDevice)
+
+    EditConfigBtn := MainGui.AddButton("x580 y" configY " w150 h30", "Edit Config")
+    EditConfigBtn.OnEvent("Click", EditChannelConfig)
     
     ; Show GUI
-    MainGui.Show("w1130 h700")
+    MainGui.Show("w1130 h760")
 }
 
 CreateChannelSet(index, x, y, width, height) {
@@ -115,17 +123,20 @@ CreateChannelSet(index, x, y, width, height) {
     ; Get default values from loaded INI
     defaultName := ""
     virtualChannel := ""
+    aliases := []
     for item in ChannelSets {
         if (item.Index = index) {
             defaultName := item.DefaultName
             virtualChannel := item.VirtualChannel
+            if (item.HasOwnProp("Aliases"))
+                aliases := item.Aliases
             break
         }
     }
     
     ; Row 1: Label (INI name or "Set X") and Arrow button
-    labelText := (defaultName != "") ? defaultName : "Set " index
-    MainGui.AddText("x" x " y" y " w" (width - 28) " h16 +0x200", labelText)
+    labelCtrl := MainGui.AddText("x" x " y" y " w" (width - 28) " h16 +0x200", DisplayLabel(defaultName, index))
+    set.Label := labelCtrl
     
     arrowBtn := MainGui.AddButton("x" (x + width - 25) " yp-2 w25 h20", "→")
     arrowBtn.OnEvent("Click", ArrowClick.Bind(index))
@@ -144,6 +155,7 @@ CreateChannelSet(index, x, y, width, height) {
     ; Store set info
     set.DefaultName := defaultName
     set.VirtualChannel := virtualChannel
+    set.Aliases := aliases
     
     ; Update or add to ChannelSets
     found := false
@@ -177,6 +189,7 @@ LoadINISettings() {
         set.Index := A_Index
         set.DefaultName := IniRead(iniPath, section, "Name", "")
         set.VirtualChannel := IniRead(iniPath, section, "VirtualChannel", "")
+        set.Aliases := ParseAliasList(IniRead(iniPath, section, "Aliases", ""))
         ChannelSets.Push(set)
     }
 }
@@ -186,7 +199,8 @@ CreateDefaultINI(path) {
     Loop 60 {
         content .= "[Set" A_Index "]`n"
         content .= "Name=`n"
-        content .= "VirtualChannel=`n`n"
+        content .= "VirtualChannel=`n"
+        content .= "Aliases=`n`n"
     }
     FileAppend(content, path)
 }
@@ -528,8 +542,15 @@ GuiResize(thisGui, minMax, width, height) {
     if (minMax = -1) ; Minimized
         return
     
-    ; Adjust ListView height on resize
+    ; Keep the list above the button rows (they start at y656).
     global LV
-    if (IsObject(LV))
-        LV.Move(,, , height - 80)
+    if (!IsObject(LV))
+        return
+
+    lvHeight := height - 167
+    if (lvHeight > 593)
+        lvHeight := 593
+    if (lvHeight < 160)
+        lvHeight := 160
+    LV.Move(,, , lvHeight)
 }
