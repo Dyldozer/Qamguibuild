@@ -232,13 +232,32 @@ TokenCharLength(tokens) {
     return total
 }
 
-; True when every alias word appears as its own word in the channel name.
+; Words that show up on many unrelated channels. They cannot be the only
+; reason for a high-confidence match, so "network" does not match both
+; "Paramount Network" and "Cartoon Network".
+GenericChannelWord(token) {
+    static words := Map("network", 1, "channel", 1)
+    return words.Has(token)
+}
+
+HasDistinctiveToken(tokens) {
+    for token in tokens {
+        if (!GenericChannelWord(token))
+            return true
+    }
+    return false
+}
+
+; True when every alias word appears as its own word in the channel name,
+; and the alias includes a word that identifies the station.
 AliasContainedInChannel(aliasCore, channelCore) {
     aliasTokens := StrSplit(aliasCore, " ")
     channelTokens := StrSplit(channelCore, " ")
     if (aliasTokens.Length = 0 || channelTokens.Length = 0)
         return false
     if (TokenCharLength(aliasTokens) < 3)
+        return false
+    if (!HasDistinctiveToken(aliasTokens))
         return false
     return CountTokenOverlap(aliasTokens, channelTokens) = aliasTokens.Length
 }
@@ -258,8 +277,12 @@ TokenCoverageScore(a, b) {
     }
 
     inter := CountTokenOverlap(short, long)
-    if (inter = short.Length && TokenCharLength(short) >= 3 && long.Length > 0)
+    if (inter = short.Length && TokenCharLength(short) >= 3 && long.Length > 0) {
+        ; "network" inside "Paramount Network" is not a partial match worth showing.
+        if (!HasDistinctiveToken(short))
+            return 0
         return Round(100 * short.Length / long.Length)
+    }
 
     union := at.Length + bt.Length - CountTokenOverlap(at, bt)
     if (union = 0)
