@@ -112,23 +112,42 @@ NormalizeChannelName(str) {
     return str
 }
 
-StripTrailingQualifiers(str) {
+QualifierMap() {
     static quals := Map(
         "hd", 1, "sd", 1, "fhd", 1, "uhd", 1, "4k", 1, "hdr", 1,
         "east", 1, "west", 1, "pacific", 1, "central", 1, "mountain", 1,
         "dtv", 1, "hevc", 1, "tv", 1)
+    return quals
+}
 
+; Quality words can sit at the front ("HD Nick") as well as the end.
+LeadingQualityMap() {
+    static quals := Map("hd", 1, "sd", 1, "fhd", 1, "uhd", 1, "4k", 1, "hdr", 1)
+    return quals
+}
+
+StripEdgeQualifiers(str) {
     if (str = "")
         return ""
 
-    tokens := StrSplit(str, " ")
-    while (tokens.Length > 1) {
-        last := tokens[tokens.Length]
-        if (!quals.Has(last))
+    quals := QualifierMap()
+    leading := LeadingQualityMap()
+    loop {
+        tokens := StrSplit(str, " ")
+        changed := false
+        while (tokens.Length > 1 && quals.Has(tokens[tokens.Length])) {
+            tokens.Pop()
+            changed := true
+        }
+        while (tokens.Length > 1 && leading.Has(tokens[1])) {
+            tokens.RemoveAt(1)
+            changed := true
+        }
+        if (!changed)
             break
-        tokens.Pop()
+        str := JoinWith(tokens, " ")
     }
-    return JoinWith(tokens, " ")
+    return str
 }
 
 ; ESPN / ESPN2 and "News 5" / "News 7" are different stations, not typos.
@@ -213,6 +232,36 @@ TokenCharLength(tokens) {
     return total
 }
 
+; Words that show up on many unrelated channels. They cannot be the only
+; reason for a high-confidence match, so "network" does not match both
+; "Paramount Network" and "Cartoon Network".
+GenericChannelWord(token) {
+    static words := Map("network", 1, "channel", 1)
+    return words.Has(token)
+}
+
+HasDistinctiveToken(tokens) {
+    for token in tokens {
+        if (!GenericChannelWord(token))
+            return true
+    }
+    return false
+}
+
+; True when every alias word appears as its own word in the channel name,
+; and the alias includes a word that identifies the station.
+AliasContainedInChannel(aliasCore, channelCore) {
+    aliasTokens := StrSplit(aliasCore, " ")
+    channelTokens := StrSplit(channelCore, " ")
+    if (aliasTokens.Length = 0 || channelTokens.Length = 0)
+        return false
+    if (TokenCharLength(aliasTokens) < 3)
+        return false
+    if (!HasDistinctiveToken(aliasTokens))
+        return false
+    return CountTokenOverlap(aliasTokens, channelTokens) = aliasTokens.Length
+}
+
 TokenCoverageScore(a, b) {
     at := StrSplit(a, " ")
     bt := StrSplit(b, " ")
@@ -228,8 +277,12 @@ TokenCoverageScore(a, b) {
     }
 
     inter := CountTokenOverlap(short, long)
-    if (inter = short.Length && TokenCharLength(short) >= 3 && long.Length > 0)
+    if (inter = short.Length && TokenCharLength(short) >= 3 && long.Length > 0) {
+        ; "network" inside "Paramount Network" is not a partial match worth showing.
+        if (!HasDistinctiveToken(short))
+            return 0
         return Round(100 * short.Length / long.Length)
+    }
 
     union := at.Length + bt.Length - CountTokenOverlap(at, bt)
     if (union = 0)
@@ -237,8 +290,9 @@ TokenCoverageScore(a, b) {
     return Round(100 * CountTokenOverlap(at, bt) / union)
 }
 
-; 100 exact, 96 same name ignoring HD/region/TV suffixes, 0 when the only
-; difference is a station number. Other hits are token overlap or a typo.
+; 100 exact, 96 when the alias words are all in the channel name (so "nick"
+; matches "HD Nick BB") or the names match once HD/region/TV wording is
+; ignored. 0 when the only difference is a station number.
 ScoreAliasMatch(channelName, alias) {
     channelNorm := NormalizeChannelName(channelName)
     aliasNorm := NormalizeChannelName(alias)
@@ -247,14 +301,17 @@ ScoreAliasMatch(channelName, alias) {
     if (channelNorm = aliasNorm)
         return 100
 
-    channelCore := StripTrailingQualifiers(channelNorm)
-    aliasCore := StripTrailingQualifiers(aliasNorm)
+    channelCore := StripEdgeQualifiers(channelNorm)
+    aliasCore := StripEdgeQualifiers(aliasNorm)
     if (channelCore = "" || aliasCore = "")
         return 0
     if (channelCore = aliasCore)
         return 96
     if (DifferByStationNumber(channelCore, aliasCore))
         return 0
+    ; "nick" is a whole word in "HD Nick BB". Extra words do not reject it.
+    if (AliasContainedInChannel(aliasCore, channelCore))
+        return 96
 
     score := TokenCoverageScore(channelCore, aliasCore)
 
