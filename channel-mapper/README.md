@@ -92,7 +92,7 @@ Each set contains:
 
 - **Name** — the label shown on the set
 - **Virtual Channel** — the virtual channel used by Config Device
-- **Aliases** — other names this channel may appear as, one per line
+- **Aliases** — other names this channel may appear as, one per line or separated by `|`
 
 Save writes `ChannelSets.ini` and updates the labels and virtual channels on the main window. Assignments already typed into the name and program boxes are left as they are.
 

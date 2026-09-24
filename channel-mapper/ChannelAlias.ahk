@@ -30,9 +30,14 @@ ParseAliasList(raw) {
     if (raw = "")
         return aliases
 
-    parts := StrSplit(raw, "|`n`r")
-    for part in parts {
-        alias := Trim(part)
+    ; One alias per line, or separated by |. Normalize every break to |
+    ; before splitting. A multi-character StrSplit delimiter is one phrase,
+    ; so "par" and "spike" were staying glued together as "parspike".
+    raw := StrReplace(raw, "`r`n", "|")
+    raw := StrReplace(raw, "`n", "|")
+    raw := StrReplace(raw, "`r", "|")
+    Loop Parse, raw, "|" {
+        alias := Trim(A_LoopField)
         if (alias = "")
             continue
         key := StrLower(alias)
@@ -336,8 +341,11 @@ CollectSetAliases(set) {
     if (set.HasOwnProp("DefaultName") && set.DefaultName != "")
         names.Push(set.DefaultName)
     if (set.HasOwnProp("Aliases") && IsObject(set.Aliases)) {
-        for alias in set.Aliases
-            names.Push(alias)
+        for alias in set.Aliases {
+            ; Split again so a value saved as "par|spike" or "par`nspike" is tested as two aliases.
+            for part in ParseAliasList(alias)
+                names.Push(part)
+        }
     }
 
     for name in names {
@@ -673,7 +681,7 @@ EditChannelConfig(*) {
     ConfigGui.SetFont("s9", "Segoe UI")
     ConfigGui.OnEvent("Close", CloseConfigWindow)
 
-    ConfigGui.AddText("x12 y10 w880 h32", "Edit each set's name, virtual channel, and aliases. Put one alias per line. The set name is always used as an alias when matching. Save writes ChannelSets.ini and updates the main window.")
+    ConfigGui.AddText("x12 y10 w880 h32", "Edit each set's name, virtual channel, and aliases. Put one alias per line, or separate them with |. The set name is always used as an alias when matching. Save writes ChannelSets.ini and updates the main window.")
 
     ConfigLV := ConfigGui.AddListView("x12 y48 w540 h470 -Multi", ["Set", "Name", "Virtual Channel", "Aliases"])
     ConfigLV.OnEvent("ItemSelect", OnConfigSelect)
@@ -690,11 +698,11 @@ EditChannelConfig(*) {
     ConfigVchEdit := ConfigGui.AddEdit("x568 y120 w120 h22")
     ConfigVchEdit.OnEvent("Change", SaveConfigFields)
 
-    ConfigGui.AddText("x568 y152 w320 h18", "Aliases (one per line)")
-    ConfigAliasEdit := ConfigGui.AddEdit("x568 y172 w320 h250 Multi VScroll")
+    ConfigGui.AddText("x568 y152 w320 h18", "Aliases (one per line, or use |)")
+    ConfigAliasEdit := ConfigGui.AddEdit("x568 y172 w320 h250 Multi WantReturn VScroll")
     ConfigAliasEdit.OnEvent("Change", SaveConfigFields)
 
-    ConfigGui.AddText("x568 y432 w320 h52", "Aliases are other names this set's channel may use, such as ESPN HD or ESPN-E. Different station numbers (ESPN and ESPN2) should be separate aliases.")
+    ConfigGui.AddText("x568 y432 w320 h52", "Each alias is tested on its own. Use a new line or a | between them, for example par|spike. ESPN and ESPN2 should be separate aliases.")
 
     saveBtn := ConfigGui.AddButton("x568 y492 w150 h30", "Save")
     saveBtn.OnEvent("Click", SaveChannelConfig)
