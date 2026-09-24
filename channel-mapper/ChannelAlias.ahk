@@ -133,13 +133,15 @@ LeadingQualityMap() {
 
 ; "truTV" and "travhd" keep TV/HD stuck to the name. Split those off when the
 ; station stem is still a real word, so truTV matches "tru TV" and not TRAV HD.
-SplitGluedQualitySuffix(token) {
+; minStem stays 3 here. One- and two-letter callsigns use ScoreLowCharacterAlias,
+; which passes 1 so "fxhd" and "ehd" can peel down to "fx" and "e".
+SplitGluedQualitySuffix(token, minStem := 3) {
     static suffixes := ["fhd", "uhd", "hdr", "hd", "sd", "tv"]
     loop {
         stem := ""
         for suffix in suffixes {
             sufLen := StrLen(suffix)
-            if (StrLen(token) >= sufLen + 3 && SubStr(token, -sufLen) = suffix) {
+            if (StrLen(token) >= sufLen + minStem && SubStr(token, -sufLen) = suffix) {
                 stem := SubStr(token, 1, StrLen(token) - sufLen)
                 break
             }
@@ -149,6 +151,46 @@ SplitGluedQualitySuffix(token) {
         token := stem
     }
     return token
+}
+
+; Aliases shorter than this many letters skip the loose word search.
+LowCharacterAliasLimit() {
+    return 3
+}
+
+SignificantLetterCount(str) {
+    return StrLen(RegExReplace(str, "[^a-z0-9]", ""))
+}
+
+IsLowCharacterAlias(aliasNorm) {
+    letters := SignificantLetterCount(StripEdgeQualifiers(aliasNorm))
+    return letters > 0 && letters < LowCharacterAliasLimit()
+}
+
+; Peel a glued suffix even when only one or two letters remain, then drop
+; spaced qualifiers (HD, East, TV). "fxhd east" becomes "fx".
+StemForShortCallsign(str) {
+    if (str = "")
+        return ""
+    peeled := []
+    for token in StrSplit(str, " ")
+        peeled.Push(SplitGluedQualitySuffix(token, 1))
+    return StripEdgeQualifiers(JoinWith(peeled, " "))
+}
+
+; Short callsigns match only when both names are the same after suffixes are
+; removed. "e" matches "ehd" and "fx" matches "fxhd". They do not match a
+; longer station that merely contains those letters, and "fx" does not match "fx2".
+ScoreLowCharacterAlias(channelNorm, aliasNorm) {
+    channelStem := StemForShortCallsign(channelNorm)
+    aliasStem := StemForShortCallsign(aliasNorm)
+    if (channelStem = "" || aliasStem = "")
+        return 0
+    if (DifferByStationNumber(channelStem, aliasStem))
+        return 0
+    if (channelStem = aliasStem)
+        return 96
+    return 0
 }
 
 StripEdgeQualifiers(str) {
@@ -322,7 +364,9 @@ TokenCoverageScore(a, b) {
 
 ; 100 exact, 96 when the alias words are all in the channel name (so "nick"
 ; matches "HD Nick BB") or the names match once HD/region/TV wording is
-; ignored. 0 when the only difference is a station number.
+; ignored. One- and two-letter aliases use an exact compare after suffixes
+; are stripped, so "fx" matches "fxhd" and "e" matches "ehd". 0 when the
+; only difference is a station number.
 ScoreAliasMatch(channelName, alias) {
     channelNorm := NormalizeChannelName(channelName)
     aliasNorm := NormalizeChannelName(alias)
@@ -330,6 +374,8 @@ ScoreAliasMatch(channelName, alias) {
         return 0
     if (channelNorm = aliasNorm)
         return 100
+    if (IsLowCharacterAlias(aliasNorm))
+        return ScoreLowCharacterAlias(channelNorm, aliasNorm)
 
     channelCore := StripEdgeQualifiers(channelNorm)
     aliasCore := StripEdgeQualifiers(aliasNorm)
