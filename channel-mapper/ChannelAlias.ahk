@@ -131,9 +131,34 @@ LeadingQualityMap() {
     return quals
 }
 
+; "truTV" and "travhd" keep TV/HD stuck to the name. Split those off when the
+; station stem is still a real word, so truTV matches "tru TV" and not TRAV HD.
+SplitGluedQualitySuffix(token) {
+    static suffixes := ["fhd", "uhd", "hdr", "hd", "sd", "tv"]
+    loop {
+        stem := ""
+        for suffix in suffixes {
+            sufLen := StrLen(suffix)
+            if (StrLen(token) >= sufLen + 3 && SubStr(token, -sufLen) = suffix) {
+                stem := SubStr(token, 1, StrLen(token) - sufLen)
+                break
+            }
+        }
+        if (stem = "")
+            break
+        token := stem
+    }
+    return token
+}
+
 StripEdgeQualifiers(str) {
     if (str = "")
         return ""
+
+    glued := []
+    for token in StrSplit(str, " ")
+        glued.Push(SplitGluedQualitySuffix(token))
+    str := JoinWith(glued, " ")
 
     quals := QualifierMap()
     leading := LeadingQualityMap()
@@ -325,10 +350,16 @@ ScoreAliasMatch(channelName, alias) {
     maxLen := Max(cLen, aLen)
     minLen := Min(cLen, aLen)
     if (minLen >= 4 && maxLen <= 48 && minLen / maxLen >= 0.6) {
-        dist := Levenshtein(channelCore, aliasCore)
-        levScore := Round(100 * (1 - (dist / maxLen)))
-        if (levScore > score)
-            score := levScore
+        ; Short names like truTV and TRAV must share a prefix before a typo counts.
+        samePrefix := true
+        if (maxLen <= 8 && SubStr(channelCore, 1, 3) != SubStr(aliasCore, 1, 3))
+            samePrefix := false
+        if (samePrefix) {
+            dist := Levenshtein(channelCore, aliasCore)
+            levScore := Round(100 * (1 - (dist / maxLen)))
+            if (levScore > score)
+                score := levScore
+        }
     }
     return score
 }
