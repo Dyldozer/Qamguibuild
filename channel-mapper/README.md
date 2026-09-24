@@ -100,7 +100,7 @@ Save writes `ChannelSets.ini` and updates the labels and virtual channels on the
 
 **Match Aliases** compares every channel currently visible in the list (including an active search) with each set's name and aliases.
 
-- An alias matches when each of its words appears in the channel name, so `nick` matches `HD Nick BB`. Wording such as HD, East, or TV is ignored, so `ESPN HD` also matches a set named `ESPN`
+- An alias matches when each of its words appears in the channel name, so `nick` matches `HD Nick BB`. Wording such as HD, East, or TV is ignored, including when it is stuck to the name (`truTV` matches `tru TV` and does not match `TRAV HD`)
 - The word `network` or `channel` by itself is not a high-confidence match, so an alias of just `network` does not match Paramount Network and Cartoon Network. Use the fuller name, such as `Paramount Network`
 - Small typos can match, but they are left unchecked so you can review them
 - Different station numbers are not treated as the same channel (`ESPN` does not match `ESPN2`, and channel 5 does not match channel 7). Put the full name in the alias list when the number is part of the name
