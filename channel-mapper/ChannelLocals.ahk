@@ -4,6 +4,8 @@
 ; Get Locals reads an array of "CALLSIGN - NETWORK" strings, finds that
 ; station in the Name column of the main list, then matches the network
 ; to a set name or alias the same way Match Aliases does.
+; Names that contain "Spectrum News" keep the call sign and always pair
+; with the set named Spectrum News or the alias Spectrum News 1.
 
 ; Call signs should be a near-exact match to the list-view name.
 global LocalCallsignMatchThreshold := 94
@@ -14,7 +16,8 @@ global LocalCallsignMatchThreshold := 94
 
 ; Placeholder until the real locals source is wired in.
 ; Replace the body of this function with the implemented call-sign method.
-; Only entries that contain a dash with spaces, such as " - ", are used.
+; Only entries that contain a dash with spaces, such as " - ", are used,
+; except Spectrum News names, which ignore the text after the dash.
 GetLocalCallSigns() {
     return [
         "WTMU - Telemundo",
@@ -29,24 +32,42 @@ GetLocalCallSigns() {
 ; Parsing and matching
 ; ---------------------------------------------------------------------------
 
+ContainsSpectrumNews(str) {
+    return InStr(str, "Spectrum News", false)
+}
+
 ; Split "KTIV - CBS" into call sign and network. Uses the first dash that
 ; has a space after it so "WTMU-LD - Telemundo" keeps WTMU-LD together.
+; Spectrum News keeps the call sign and ignores the text after " - ".
 ParseLocalEntry(str) {
     str := Trim(str)
     if (str = "")
         return false
 
-    ; Allow regular, en, or em dashes, and extra spaces around them.
-    if !RegExMatch(str, "i)^(.+?)\s+[-–—]\s+(.+)$", &match)
-        return false
+    spectrum := ContainsSpectrumNews(str)
 
-    entry := {}
-    entry.Callsign := Trim(match[1])
-    entry.Network := Trim(match[2])
-    entry.Raw := str
-    if (entry.Callsign = "" || entry.Network = "")
-        return false
-    return entry
+    ; Allow regular, en, or em dashes, and extra spaces around them.
+    if RegExMatch(str, "i)^(.+?)\s+[-–—]\s+(.+)$", &match) {
+        entry := {}
+        entry.Callsign := Trim(match[1])
+        entry.Network := spectrum ? "Spectrum News" : Trim(match[2])
+        entry.Raw := str
+        entry.SpectrumNews := spectrum
+        if (entry.Callsign = "" || entry.Network = "")
+            return false
+        return entry
+    }
+
+    if (spectrum) {
+        entry := {}
+        entry.Callsign := str
+        entry.Network := "Spectrum News"
+        entry.Raw := str
+        entry.SpectrumNews := true
+        return entry
+    }
+
+    return false
 }
 
 ; Text before the first " - ", or the first word if there is no dash.
@@ -168,6 +189,60 @@ FindChannelForLocal(channels, parsed) {
     return result
 }
 
+IsSpectrumNewsSetAlias(name) {
+    norm := NormalizeChannelName(name)
+    if (norm = "")
+        return 0
+    if (norm = "spectrum news")
+        return 100
+    if (norm = "spectrum news 1")
+        return 99
+    if (InStr(norm, "spectrum news") = 1)
+        return 90
+    return 0
+}
+
+; Set named "Spectrum News", or a set whose aliases include "Spectrum News 1".
+FindSpectrumNewsSet() {
+    global ChannelSets
+
+    bestScore := -1
+    bestSet := ""
+    bestAlias := ""
+    for set in ChannelSets {
+        aliases := CollectSetAliases(set)
+        if (aliases.Length = 0)
+            continue
+        if (!set.HasOwnProp("NameEdit") || !set.HasOwnProp("ProgramEdit"))
+            continue
+
+        for alias in aliases {
+            score := IsSpectrumNewsSetAlias(alias)
+            if (score = 0)
+                continue
+            better := false
+            if (score > bestScore)
+                better := true
+            else if (score = bestScore && IsObject(bestSet) && set.Index < bestSet.Index)
+                better := true
+            if (better) {
+                bestScore := score
+                bestSet := set
+                bestAlias := alias
+            }
+        }
+    }
+
+    if (!IsObject(bestSet))
+        return false
+
+    result := {}
+    result.Set := bestSet
+    result.MatchedAlias := bestAlias
+    result.Score := bestScore
+    return result
+}
+
 ; Best set whose name or aliases match the network (CBS, Telemundo, ...).
 FindSetByNetwork(network) {
     global ChannelSets, AliasMatchShowThreshold
@@ -232,9 +307,15 @@ BuildLocalSuggestions(channels, locals) {
             continue
         }
 
-        setMatch := FindSetByNetwork(parsed.Network)
+        if (parsed.HasOwnProp("SpectrumNews") && parsed.SpectrumNews)
+            setMatch := FindSpectrumNewsSet()
+        else
+            setMatch := FindSetByNetwork(parsed.Network)
         if (!IsObject(setMatch)) {
-            result.Skipped.Push(parsed.Raw ": no set named " parsed.Network)
+            if (parsed.HasOwnProp("SpectrumNews") && parsed.SpectrumNews)
+                result.Skipped.Push(parsed.Raw ": no set named Spectrum News (or alias Spectrum News 1)")
+            else
+                result.Skipped.Push(parsed.Raw ": no set named " parsed.Network)
             continue
         }
 
