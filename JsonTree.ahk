@@ -846,11 +846,17 @@ class Json {
 class JsonParser {
     __New(text) {
         this.text := text
-        this.ptr := StrPtr(text)
         this.len := StrLen(text)
         this.pos := 1
         this.line := 1
         this.col := 1
+    }
+
+    ; Code point at a 1-based index. "{" is 123 (byte 7B).
+    At(pos) {
+        if (pos < 1 || pos > this.len)
+            return 0
+        return Ord(SubStr(this.text, pos, 1))
     }
 
     SkipBom() {
@@ -861,16 +867,16 @@ class JsonParser {
     Peek() {
         if (this.pos > this.len)
             return 0
-        return NumGet(this.ptr, (this.pos - 1) * 2, "UShort")
+        return this.At(this.pos)
     }
 
     Advance() {
         if (this.pos > this.len)
             this.Fail("Unexpected end of JSON")
-        ch := NumGet(this.ptr, (this.pos - 1) * 2, "UShort")
+        ch := this.At(this.pos)
         this.pos++
         if (ch = 13) {
-            if (this.pos <= this.len && NumGet(this.ptr, (this.pos - 1) * 2, "UShort") = 10)
+            if (this.pos <= this.len && this.At(this.pos) = 10)
                 this.pos++
             this.line++
             this.col := 1
@@ -891,12 +897,11 @@ class JsonParser {
 
     SkipWs() {
         len := this.len
-        ptr := this.ptr
         pos := this.pos
         line := this.line
         col := this.col
         while (pos <= len) {
-            ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+            ch := this.At(pos)
             if (ch = 32 || ch = 9) {
                 pos++
                 col++
@@ -906,7 +911,7 @@ class JsonParser {
                 col := 1
             } else if (ch = 13) {
                 pos++
-                if (pos <= len && NumGet(ptr, (pos - 1) * 2, "UShort") = 10)
+                if (pos <= len && this.At(pos) = 10)
                     pos++
                 line++
                 col := 1
@@ -924,6 +929,8 @@ class JsonParser {
         ch := this.Peek()
         if (ch >= 32 && ch < 127)
             extra := " near '" Chr(ch) "'"
+        else if (ch)
+            extra := " U+" Format("{:04X}", ch)
         throw Error(msg extra " (line " this.line ", column " this.col ")", -1)
     }
 
@@ -1026,7 +1033,6 @@ class JsonParser {
     ParseString() {
         this.Advance()
         len := this.len
-        ptr := this.ptr
         text := this.text
         pos := this.pos
         line := this.line
@@ -1038,7 +1044,7 @@ class JsonParser {
                 this.SetPos(pos, line, col)
                 this.Fail("Unterminated string")
             }
-            ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+            ch := this.At(pos)
             if (ch = 34) {
                 if (pos > plainStart)
                     parts.Push(SubStr(text, plainStart, pos - plainStart))
@@ -1128,13 +1134,12 @@ class JsonParser {
 
     ParseNumber() {
         len := this.len
-        ptr := this.ptr
         pos := this.pos
         line := this.line
         col := this.col
         start := pos
 
-        if (pos <= len && NumGet(ptr, (pos - 1) * 2, "UShort") = 45) {
+        if (pos <= len && this.At(pos) = 45) {
             pos++
             col++
         }
@@ -1142,7 +1147,7 @@ class JsonParser {
             this.SetPos(pos, line, col)
             this.Fail("Invalid number")
         }
-        ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+        ch := this.At(pos)
         if (ch < 48 || ch > 57) {
             this.SetPos(pos, line, col)
             this.Fail("Invalid number")
@@ -1151,7 +1156,7 @@ class JsonParser {
             pos++
             col++
             if (pos <= len) {
-                next := NumGet(ptr, (pos - 1) * 2, "UShort")
+                next := this.At(pos)
                 if (next >= 48 && next <= 57) {
                     this.SetPos(pos, line, col)
                     this.Fail("Invalid number")
@@ -1159,19 +1164,19 @@ class JsonParser {
             }
         } else {
             while (pos <= len) {
-                ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+                ch := this.At(pos)
                 if (ch < 48 || ch > 57)
                     break
                 pos++
                 col++
             }
         }
-        if (pos <= len && NumGet(ptr, (pos - 1) * 2, "UShort") = 46) {
+        if (pos <= len && this.At(pos) = 46) {
             pos++
             col++
             frac := pos
             while (pos <= len) {
-                ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+                ch := this.At(pos)
                 if (ch < 48 || ch > 57)
                     break
                 pos++
@@ -1183,12 +1188,12 @@ class JsonParser {
             }
         }
         if (pos <= len) {
-            ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+            ch := this.At(pos)
             if (ch = 101 || ch = 69) {
                 pos++
                 col++
                 if (pos <= len) {
-                    sign := NumGet(ptr, (pos - 1) * 2, "UShort")
+                    sign := this.At(pos)
                     if (sign = 43 || sign = 45) {
                         pos++
                         col++
@@ -1196,7 +1201,7 @@ class JsonParser {
                 }
                 exp := pos
                 while (pos <= len) {
-                    ch := NumGet(ptr, (pos - 1) * 2, "UShort")
+                    ch := this.At(pos)
                     if (ch < 48 || ch > 57)
                         break
                     pos++
@@ -1326,14 +1331,19 @@ class JsonWriter {
 }
 
 ReadJsonFile(path) {
-    buf := FileRead(path, "RAW")
-    if (buf.Size = 0)
-        return ""
-    if (buf.Size >= 2 && NumGet(buf, 0, "UChar") = 0xFF && NumGet(buf, 1, "UChar") = 0xFE)
-        return StrGet(buf, "UTF-16")
-    if (buf.Size >= 2 && NumGet(buf, 0, "UChar") = 0xFE && NumGet(buf, 1, "UChar") = 0xFF)
-        return StrGet(buf, "CP1201")
-    return StrGet(buf, "UTF-8")
+    ; A raw buffer handed to StrGet was treated as UTF-16, so a file that
+    ; starts with byte 7B ("{") was not read as the character "{".
+    f := FileOpen(path, "r")
+    if !f
+        throw Error("Could not open the file")
+    b1 := f.ReadUChar()
+    b2 := f.ReadUChar()
+    f.Close()
+    if (b1 = 0xFF && b2 = 0xFE)
+        return FileRead(path, "UTF-16")
+    if (b1 = 0xFE && b2 = 0xFF)
+        return FileRead(path, "CP1201")
+    return FileRead(path, "UTF-8")
 }
 
 ChildCount(value) {
