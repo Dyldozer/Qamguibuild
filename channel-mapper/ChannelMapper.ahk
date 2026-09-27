@@ -8,6 +8,7 @@
 ; Include save/load functionality
 #Include "ChannelSetIO.ahk"
 #Include "ChannelAlias.ahk"
+#Include "ChannelLocals.ahk"
 
 ; Global variables
 global ChannelList := []
@@ -76,8 +77,11 @@ Main() {
     ClearBtn := MainGui.AddButton("x+5 yp w130 h26", "Clear All")
     ClearBtn.OnEvent("Click", ClearAllChannelSets)
 
-    MatchAliasBtn := MainGui.AddButton("xm y716 w400 h26", "Match Aliases")
+    MatchAliasBtn := MainGui.AddButton("xm y716 w195 h26", "Match Aliases")
     MatchAliasBtn.OnEvent("Click", SuggestAliasMatches)
+
+    GetLocalsBtn := MainGui.AddButton("x+10 yp w195 h26", "Get Locals")
+    GetLocalsBtn.OnEvent("Click", SuggestLocalMatches)
     
     ; Right panel - 60 channel sets (4 columns x 15 rows)
     MainGui.AddText("x420 y5 w700 h20 Center", "Channel Assignment Sets")
