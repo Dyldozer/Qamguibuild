@@ -8,6 +8,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 - `ChannelMapper_Standalone.ahk` - Standalone version with built-in UIA (no external library needed)
 - `ChannelSetIO.ahk` - Save/Load functionality (included by main scripts)
 - `ChannelAlias.ahk` - Config editor and alias matching (included by main scripts)
+- `ChannelLocals.ahk` - Get Locals matching (included by main scripts)
 - `ChannelSets.ini` - Configuration file for the 60 channel sets
 - `ChannelSets_Example.ini` - Example configuration with sample data
 
@@ -46,6 +47,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
    - Click the arrow button (→) next to any set to assign that channel
    - The channel name and program number will be copied to that set
    - Or click **Match Aliases** to fuzzy-match the visible channel names against each set's name and aliases, then accept the suggestions you want
+   - Or click **Get Locals** to match local call signs (for example `KTIV - CBS`) to the Name column in the list, then to the set named after that network
 
 6. **Configure device**: Click "Config Device" to create a map of Program # → Virtual Channel
 
@@ -64,7 +66,7 @@ A GUI application for mapping channels from a Chrome-based channel selector to v
 | ...                     |                                              |
 | [Remove Duplicates]     |                                              |
 | [Remove Freq 999000]    |                                              |
-| [Match Aliases]         | [Config Device]  [Edit Config]               |
+| [Match Aliases] [Get Locals] | [Config Device]  [Edit Config]          |
 +-------------------------+----------------------------------------------+
 ```
 
@@ -85,6 +87,7 @@ Each set contains:
 - **Remove Duplicates**: Removes channels with duplicate names, keeping the one with the lowest program number
 - **Remove Freq 999000**: Removes all channels with frequency 999000
 - **Match Aliases**: Fuzzy-matches the channel names currently shown in the list against each set's name and aliases
+- **Get Locals**: Matches local call signs to the Name column, then matches the network to each set's name and aliases
 
 ## Edit Config
 
@@ -107,6 +110,17 @@ Save writes `ChannelSets.ini` and updates the labels and virtual channels on the
 - Different station numbers are not treated as the same channel (`ESPN` does not match `ESPN2`, and channel 5 does not match channel 7). Put the full name in the alias list when the number is part of the name
 
 The suggestion window lists the best match for each set, with the matched alias and score. Strong matches for sets that do not already have an assignment start checked. Check or uncheck rows, then **Accept Checked** to copy the channel name and program number into those sets (the same result as the arrow button).
+
+## Get Locals
+
+**Get Locals** takes an array of local stations in the form `CALLSIGN - NETWORK` (for example `KTIV - CBS`). Only entries that contain ` - ` are used.
+
+1. The call sign (the text before ` - `) is matched to the **Name** column in the main list
+2. If that channel is found, the network (the text after ` - `) is matched to a set's name and aliases, using the same scoring as Match Aliases
+
+The suggestion window works the same way as Match Aliases. Accepting a row copies the listed channel (the local call sign and its program number) into the matching set.
+
+The list of locals currently comes from a placeholder in `GetLocalCallSigns()` in `ChannelLocals.ahk`. Replace that function with the real locals source when it is ready.
 
 ## Save/Load Assignments
 

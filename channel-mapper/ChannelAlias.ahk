@@ -10,6 +10,7 @@ global AliasMatchCheckThreshold := 94
 global SuggestionGui := ""
 global SuggestionLV := ""
 global SuggestionRows := []
+global SuggestionAcceptTitle := "Match Aliases"
 
 global ConfigGui := ""
 global ConfigLV := ""
@@ -608,11 +609,12 @@ SuggestAliasMatches(*) {
     ShowSuggestionWindow(suggestions, channels.Length)
 }
 
-ShowSuggestionWindow(suggestions, visibleCount) {
-    global SuggestionGui, SuggestionLV, SuggestionRows, MainGui, SearchEdit
+ShowSuggestionWindow(suggestions, visibleCount, windowTitle := "Alias Match Suggestions", acceptTitle := "Match Aliases", introOverride := "") {
+    global SuggestionGui, SuggestionLV, SuggestionRows, SuggestionAcceptTitle, MainGui, SearchEdit
 
     CloseSuggestionWindow()
     SuggestionRows := suggestions
+    SuggestionAcceptTitle := acceptTitle
 
     checked := 0
     for suggestion in suggestions {
@@ -620,13 +622,17 @@ ShowSuggestionWindow(suggestions, visibleCount) {
             checked++
     }
 
-    SuggestionGui := Gui("+Owner" MainGui.Hwnd, "Alias Match Suggestions")
+    SuggestionGui := Gui("+Owner" MainGui.Hwnd, windowTitle)
     SuggestionGui.SetFont("s9", "Segoe UI")
     SuggestionGui.OnEvent("Close", CloseSuggestionWindow)
 
     filterNote := (SearchEdit.Value != "") ? " Search is filtering the list." : ""
-    intro := "Best match for each set, from " visibleCount " listed channels. "
-        . checked " strong matches for empty sets are checked." filterNote
+    if (introOverride != "")
+        intro := introOverride " " checked " strong matches for empty sets are checked."
+    else
+        intro := "Best match for each set, from " visibleCount " listed channels. "
+            . checked " strong matches for empty sets are checked."
+    intro .= filterNote
         . "`nAccept copies the channel name and program number into the set, the same way the arrow button does."
     SuggestionGui.AddText("x12 y10 w900 h40", intro)
 
@@ -691,7 +697,7 @@ SetSuggestionChecks(mode) {
 }
 
 AcceptAliasSuggestions(*) {
-    global SuggestionLV, SuggestionRows
+    global SuggestionLV, SuggestionRows, SuggestionAcceptTitle
     if (!IsObject(SuggestionLV))
         return
 
@@ -705,14 +711,15 @@ AcceptAliasSuggestions(*) {
             accepted++
     }
 
+    title := (SuggestionAcceptTitle != "") ? SuggestionAcceptTitle : "Match Aliases"
     if (accepted = 0) {
-        MsgBox("Check one or more suggestions to assign.", "Match Aliases", "Icon!")
+        MsgBox("Check one or more suggestions to assign.", title, "Icon!")
         return
     }
 
     CloseSuggestionWindow()
     suffix := (accepted = 1) ? "" : "s"
-    MsgBox("Assigned " accepted " channel" suffix ".", "Match Aliases", "Iconi")
+    MsgBox("Assigned " accepted " channel" suffix ".", title, "Iconi")
 }
 
 ApplyChannelToSet(setIndex, channelName, programNum) {
