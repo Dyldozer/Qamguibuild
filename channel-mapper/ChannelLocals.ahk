@@ -1,9 +1,11 @@
 ; ChannelLocals.ahk - Match local call signs to the main list and to sets.
 ; Included by ChannelMapper.ahk and ChannelMapper_Standalone.ahk.
 ;
-; Get Locals reads an array of "CALLSIGN - NETWORK" strings, finds the
-; call sign in the Name column of the main list (LV column 3), then matches
-; the network to a set name or alias the same way Match Aliases does.
+; Get Locals reads an array of "CALLSIGN - NETWORK" strings, finds that
+; station in the Name column of the main list, then matches the network
+; to a set name or alias the same way Match Aliases does.
+; Names that contain "Spectrum News" keep the call sign and always pair
+; with the set named Spectrum News or the alias Spectrum News 1.
 
 ; Call signs should be a near-exact match to the list-view name.
 global LocalCallsignMatchThreshold := 94
@@ -14,9 +16,11 @@ global LocalCallsignMatchThreshold := 94
 
 ; Placeholder until the real locals source is wired in.
 ; Replace the body of this function with the implemented call-sign method.
-; Only entries that contain " - " are used.
+; Only entries that contain a dash with spaces, such as " - ", are used,
+; except Spectrum News names, which ignore the text after the dash.
 GetLocalCallSigns() {
     return [
+        "WTMU - Telemundo",
         "KTIV - CBS",
         "KCAU - ABC",
         "KMEG - FOX",
@@ -28,34 +32,166 @@ GetLocalCallSigns() {
 ; Parsing and matching
 ; ---------------------------------------------------------------------------
 
-; Split "KTIV - CBS" into call sign and network. Uses the first " - " only
-; so extra text after the network is kept with the network name.
-ParseLocalEntry(str) {
-    str := Trim(str)
-    sep := " - "
-    pos := InStr(str, sep)
-    if (pos = 0)
-        return false
-
-    entry := {}
-    entry.Callsign := Trim(SubStr(str, 1, pos - 1))
-    entry.Network := Trim(SubStr(str, pos + StrLen(sep)))
-    entry.Raw := str
-    if (entry.Callsign = "" || entry.Network = "")
-        return false
-    return entry
+ContainsSpectrumNews(str) {
+    return InStr(str, "Spectrum News", false)
 }
 
-; Best list-view channel whose Name (column 3) matches the call sign.
-FindChannelByCallsign(channels, callsign) {
-    global LocalCallsignMatchThreshold
+; Split "KTIV - CBS" into call sign and network. Uses the first dash that
+; has a space after it so "WTMU-LD - Telemundo" keeps WTMU-LD together.
+; Spectrum News keeps the call sign and ignores the text after " - ".
+ParseLocalEntry(str) {
+    str := Trim(str)
+    if (str = "")
+        return false
+
+    spectrum := ContainsSpectrumNews(str)
+
+    ; Allow regular, en, or em dashes, and extra spaces around them.
+    if RegExMatch(str, "i)^(.+?)\s+[-–—]\s+(.+)$", &match) {
+        left := Trim(match[1])
+        right := Trim(match[2])
+        entry := {}
+        ; "WXXX - Spectrum News 1" keeps WXXX. "Spectrum News - Buffalo"
+        ; has no call sign, so search the list for Spectrum News.
+        if (spectrum && ContainsSpectrumNews(left))
+            entry.Callsign := "Spectrum News"
+        else
+            entry.Callsign := left
+        entry.Network := spectrum ? "Spectrum News" : right
+        entry.Raw := str
+        entry.SpectrumNews := spectrum
+        if (entry.Callsign = "" || entry.Network = "")
+            return false
+        return entry
+    }
+
+    if (spectrum) {
+        entry := {}
+        entry.Callsign := str
+        entry.Network := "Spectrum News"
+        entry.Raw := str
+        entry.SpectrumNews := true
+        return entry
+    }
+
+    return false
+}
+
+; Text before the first " - ", or the first word if there is no dash.
+; "WTMU - Telemundo" and "WTMU-LD" both yield a call-sign token.
+FirstNameSegment(str) {
+    str := Trim(str)
+    if (str = "")
+        return ""
+    if RegExMatch(str, "i)^(.+?)\s+[-–—]\s+", &match)
+        return Trim(match[1])
+    tokens := StrSplit(NormalizeChannelName(str), " ")
+    if (tokens.Length = 0)
+        return ""
+    return tokens[1]
+}
+
+CallsignQualitySuffixes() {
+    return ["hevc", "dtv", "fhd", "uhd", "hdr", "hd", "sd", "tv"]
+}
+
+; True when the list name is the call sign plus a glued quality word.
+; "WTMUHD" matches "WTMU". Do not use SplitGluedQualitySuffix here: that
+; peels "uhd" first and turns WTMUHD into WTM, which then fails to match.
+ChannelIsCallsignPlusSuffix(channelName, callsign) {
+    chan := NormalizeChannelName(channelName)
+    call := NormalizeChannelName(callsign)
+    if (chan = "" || call = "")
+        return false
+    if (chan = call)
+        return true
+    for suffix in CallsignQualitySuffixes() {
+        sufLen := StrLen(suffix)
+        if (StrLen(chan) > sufLen && SubStr(chan, -sufLen) = suffix) {
+            stem := SubStr(chan, 1, StrLen(chan) - sufLen)
+            if (stem = call)
+                return true
+        }
+    }
+    return false
+}
+
+; Compare a listed channel name to a local call sign.
+; Prefer the first segment so "WTMU - Telemundo" matches "WTMU".
+; Also accept glued suffixes so "WTMUHD" matches "WTMU".
+ScoreCallsignMatch(channelName, callsign) {
+    callNorm := NormalizeChannelName(callsign)
+    chanNorm := NormalizeChannelName(channelName)
+    if (callNorm = "" || chanNorm = "")
+        return 0
+    if (chanNorm = callNorm)
+        return 100
+    if (ChannelIsCallsignPlusSuffix(channelName, callsign))
+        return 100
+
+    firstNorm := NormalizeChannelName(FirstNameSegment(channelName))
+    if (firstNorm != "" && firstNorm = callNorm)
+        return 100
+    if (firstNorm != "" && ChannelIsCallsignPlusSuffix(firstNorm, callsign))
+        return 100
+
+    callFirst := NormalizeChannelName(FirstNameSegment(callsign))
+    if (firstNorm != "" && callFirst != "" && firstNorm = callFirst)
+        return 100
+
+    return ScoreAliasMatch(channelName, callsign)
+}
+
+; Use every loaded channel, not just the current search filter.
+GetChannelsForLocalMatch() {
+    global FullChannelList
+    if (IsObject(FullChannelList) && FullChannelList.Length > 0)
+        return FullChannelList
+    return GetVisibleChannels()
+}
+
+ScoreSpectrumNewsChannel(channelName) {
+    if (ContainsSpectrumNews(channelName))
+        return 100
+    compact := StrReplace(NormalizeChannelName(channelName), " ", "")
+    if (compact != "" && InStr(compact, "spectrumnews"))
+        return 96
+    return 0
+}
+
+; Find the list-view row for a local. Try the call sign first, then the
+; full "CALL - NETWORK" string, then the network name (Telemundo).
+; Spectrum News also matches any list name that contains Spectrum News,
+; so "Spectrum News - Buffalo" still pairs when there is no call sign.
+FindChannelForLocal(channels, parsed) {
+    global LocalCallsignMatchThreshold, AliasMatchShowThreshold, AliasMatchCheckThreshold
 
     bestScore := -1
     bestChannel := ""
     for channel in channels {
-        score := ScoreCallsignMatch(channel.Name, callsign)
-        if (score < LocalCallsignMatchThreshold)
+        callScore := ScoreCallsignMatch(channel.Name, parsed.Callsign)
+        rawScore := 0
+        if (NormalizeChannelName(channel.Name) = NormalizeChannelName(parsed.Raw))
+            rawScore := 100
+        else
+            rawScore := ScoreAliasMatch(channel.Name, parsed.Raw)
+        netScore := ScoreAliasMatch(channel.Name, parsed.Network)
+        specScore := 0
+        if (parsed.HasOwnProp("SpectrumNews") && parsed.SpectrumNews)
+            specScore := ScoreSpectrumNewsChannel(channel.Name)
+
+        score := 0
+        if (specScore >= LocalCallsignMatchThreshold)
+            score := specScore
+        else if (callScore >= LocalCallsignMatchThreshold)
+            score := callScore
+        else if (rawScore >= AliasMatchShowThreshold)
+            score := rawScore
+        else if (netScore >= AliasMatchCheckThreshold)
+            score := netScore
+        if (score = 0)
             continue
+
         better := false
         if (score > bestScore)
             better := true
@@ -76,17 +212,22 @@ FindChannelByCallsign(channels, callsign) {
     return result
 }
 
-; Exact normalized names count as 100. Otherwise reuse alias scoring so
-; "KTIV HD" still matches the call sign "KTIV".
-ScoreCallsignMatch(channelName, callsign) {
-    if (NormalizeChannelName(channelName) = NormalizeChannelName(callsign) && NormalizeChannelName(callsign) != "")
+IsSpectrumNewsSetAlias(name) {
+    norm := NormalizeChannelName(name)
+    if (norm = "")
+        return 0
+    if (norm = "spectrum news")
         return 100
-    return ScoreAliasMatch(channelName, callsign)
+    if (norm = "spectrum news 1")
+        return 99
+    if (InStr(norm, "spectrum news") = 1)
+        return 90
+    return 0
 }
 
-; Best set whose name or aliases match the network (CBS, ABC, ...).
-FindSetByNetwork(network) {
-    global ChannelSets, AliasMatchShowThreshold
+; Set named "Spectrum News", or a set whose aliases include "Spectrum News 1".
+FindSpectrumNewsSet() {
+    global ChannelSets
 
     bestScore := -1
     bestSet := ""
@@ -99,7 +240,53 @@ FindSetByNetwork(network) {
             continue
 
         for alias in aliases {
-            score := ScoreAliasMatch(network, alias)
+            score := IsSpectrumNewsSetAlias(alias)
+            if (score = 0)
+                continue
+            better := false
+            if (score > bestScore)
+                better := true
+            else if (score = bestScore && IsObject(bestSet) && set.Index < bestSet.Index)
+                better := true
+            if (better) {
+                bestScore := score
+                bestSet := set
+                bestAlias := alias
+            }
+        }
+    }
+
+    if (!IsObject(bestSet))
+        return false
+
+    result := {}
+    result.Set := bestSet
+    result.MatchedAlias := bestAlias
+    result.Score := bestScore
+    return result
+}
+
+; Best set whose name or aliases match the network (CBS, Telemundo, ...).
+FindSetByNetwork(network) {
+    global ChannelSets, AliasMatchShowThreshold
+
+    netNorm := NormalizeChannelName(network)
+    bestScore := -1
+    bestSet := ""
+    bestAlias := ""
+    for set in ChannelSets {
+        aliases := CollectSetAliases(set)
+        if (aliases.Length = 0)
+            continue
+        if (!set.HasOwnProp("NameEdit") || !set.HasOwnProp("ProgramEdit"))
+            continue
+
+        for alias in aliases {
+            score := 0
+            if (netNorm != "" && NormalizeChannelName(alias) = netNorm)
+                score := 100
+            else
+                score := Max(ScoreAliasMatch(alias, network), ScoreAliasMatch(network, alias))
             if (score < AliasMatchShowThreshold)
                 continue
             better := false
@@ -125,9 +312,11 @@ FindSetByNetwork(network) {
     return result
 }
 
-; One suggestion per set. Each local must match a list-view call sign and a set.
+; One suggestion per set. Each local must match a list-view channel and a set.
 BuildLocalSuggestions(channels, locals) {
-    suggestions := []
+    result := {}
+    result.Suggestions := []
+    result.Skipped := []
     bySet := Map()
 
     for local in locals {
@@ -135,13 +324,23 @@ BuildLocalSuggestions(channels, locals) {
         if (!IsObject(parsed))
             continue
 
-        channelMatch := FindChannelByCallsign(channels, parsed.Callsign)
-        if (!IsObject(channelMatch))
+        channelMatch := FindChannelForLocal(channels, parsed)
+        if (!IsObject(channelMatch)) {
+            result.Skipped.Push(parsed.Raw ": no list channel matching " parsed.Callsign)
             continue
+        }
 
-        setMatch := FindSetByNetwork(parsed.Network)
-        if (!IsObject(setMatch))
+        if (parsed.HasOwnProp("SpectrumNews") && parsed.SpectrumNews)
+            setMatch := FindSpectrumNewsSet()
+        else
+            setMatch := FindSetByNetwork(parsed.Network)
+        if (!IsObject(setMatch)) {
+            if (parsed.HasOwnProp("SpectrumNews") && parsed.SpectrumNews)
+                result.Skipped.Push(parsed.Raw ": no set named Spectrum News (or alias Spectrum News 1)")
+            else
+                result.Skipped.Push(parsed.Raw ": no set named " parsed.Network)
             continue
+        }
 
         set := setMatch.Set
         channel := channelMatch.Channel
@@ -168,18 +367,20 @@ BuildLocalSuggestions(channels, locals) {
                 keepNew := true
             else if (suggestion.Score = existing.Score && SafeProgramNum(suggestion.ProgramNum) < SafeProgramNum(existing.ProgramNum))
                 keepNew := true
-            if (!keepNew)
+            if (!keepNew) {
+                result.Skipped.Push(parsed.Raw ": set " suggestion.SetName " already has a stronger local match")
                 continue
+            }
         }
         bySet[set.Index] := suggestion
     }
 
     for index, suggestion in bySet
-        suggestions.Push(suggestion)
+        result.Suggestions.Push(suggestion)
 
-    MarkSharedSuggestions(suggestions)
-    SortSuggestions(suggestions)
-    return suggestions
+    MarkSharedSuggestions(result.Suggestions)
+    SortSuggestions(result.Suggestions)
+    return result
 }
 
 CountUsableLocals(locals) {
@@ -191,6 +392,18 @@ CountUsableLocals(locals) {
     return count
 }
 
+FormatSkipReasons(skipped) {
+    if (skipped.Length = 0)
+        return ""
+    text := ""
+    limit := Min(skipped.Length, 8)
+    Loop limit
+        text .= "`n- " skipped[A_Index]
+    if (skipped.Length > limit)
+        text .= "`n- ... and " (skipped.Length - limit) " more"
+    return text
+}
+
 ; ---------------------------------------------------------------------------
 ; Button handler
 ; ---------------------------------------------------------------------------
@@ -198,7 +411,7 @@ CountUsableLocals(locals) {
 SuggestLocalMatches(*) {
     global ChannelSets, SearchEdit
 
-    channels := GetVisibleChannels()
+    channels := GetChannelsForLocalMatch()
     if (channels.Length = 0) {
         MsgBox("Load channels before matching locals.`n`nThe channel list is empty.", "Get Locals", "Icon!")
         return
@@ -221,16 +434,19 @@ SuggestLocalMatches(*) {
         return
     }
 
-    suggestions := BuildLocalSuggestions(channels, locals)
+    built := BuildLocalSuggestions(channels, locals)
+    suggestions := built.Suggestions
     if (suggestions.Length = 0) {
-        extra := ""
+        extra := FormatSkipReasons(built.Skipped)
         if (SearchEdit.Value != "")
-            extra := "`n`nThe search box is filtering the list. Clear it to match every loaded channel."
-        MsgBox("No local matches were found.`n`nLooked at " usable " local entries and " channels.Length " listed channels." extra, "Get Locals", "Icon!")
+            extra .= "`n`nThe search box is filtering the list. Get Locals still uses every loaded channel."
+        MsgBox("No local matches were found.`n`nLooked at " usable " local entries and " channels.Length " loaded channels." extra, "Get Locals", "Icon!")
         return
     }
 
-    intro := "Matched local call signs to listed channel names, then matched the network to each set's name and aliases. "
-        . "From " usable " local entries and " channels.Length " listed channels."
+    intro := "Matched local call signs to loaded channel names, then matched the network to each set's name and aliases. "
+        . "From " usable " local entries and " channels.Length " loaded channels."
+    if (built.Skipped.Length > 0)
+        intro .= " " built.Skipped.Length " local" (built.Skipped.Length = 1 ? "" : "s") " did not match."
     ShowSuggestionWindow(suggestions, channels.Length, "Local Channel Suggestions", "Get Locals", intro)
 }

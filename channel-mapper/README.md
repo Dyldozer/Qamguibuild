@@ -115,8 +115,9 @@ The suggestion window lists the best match for each set, with the matched alias 
 
 **Get Locals** takes an array of local stations in the form `CALLSIGN - NETWORK` (for example `KTIV - CBS`). Only entries that contain ` - ` are used.
 
-1. The call sign (the text before ` - `) is matched to the **Name** column in the main list
+1. The call sign (the text before ` - `) is matched to the **Name** column in the main list. `WTMU` matches `WTMU`, `WTMUHD`, and `WTMU - Telemundo`
 2. If that channel is found, the network (the text after ` - `) is matched to a set's name and aliases, using the same scoring as Match Aliases
+3. If the local name contains `Spectrum News`, the text after ` - ` is ignored. `WXXX - Spectrum News 1` uses call sign `WXXX`. `Spectrum News - Buffalo` has no call sign, so the list name is matched if it contains **Spectrum News**. Either form is paired with the set named **Spectrum News**, or a set whose aliases include **Spectrum News 1**
 
 The suggestion window works the same way as Match Aliases. Accepting a row copies the listed channel (the local call sign and its program number) into the matching set.
 
