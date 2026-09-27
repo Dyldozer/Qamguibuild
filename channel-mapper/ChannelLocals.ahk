@@ -48,9 +48,16 @@ ParseLocalEntry(str) {
 
     ; Allow regular, en, or em dashes, and extra spaces around them.
     if RegExMatch(str, "i)^(.+?)\s+[-–—]\s+(.+)$", &match) {
+        left := Trim(match[1])
+        right := Trim(match[2])
         entry := {}
-        entry.Callsign := Trim(match[1])
-        entry.Network := spectrum ? "Spectrum News" : Trim(match[2])
+        ; "WXXX - Spectrum News 1" keeps WXXX. "Spectrum News - Buffalo"
+        ; has no call sign, so search the list for Spectrum News.
+        if (spectrum && ContainsSpectrumNews(left))
+            entry.Callsign := "Spectrum News"
+        else
+            entry.Callsign := left
+        entry.Network := spectrum ? "Spectrum News" : right
         entry.Raw := str
         entry.SpectrumNews := spectrum
         if (entry.Callsign = "" || entry.Network = "")
@@ -143,8 +150,19 @@ GetChannelsForLocalMatch() {
     return GetVisibleChannels()
 }
 
+ScoreSpectrumNewsChannel(channelName) {
+    if (ContainsSpectrumNews(channelName))
+        return 100
+    compact := StrReplace(NormalizeChannelName(channelName), " ", "")
+    if (compact != "" && InStr(compact, "spectrumnews"))
+        return 96
+    return 0
+}
+
 ; Find the list-view row for a local. Try the call sign first, then the
 ; full "CALL - NETWORK" string, then the network name (Telemundo).
+; Spectrum News also matches any list name that contains Spectrum News,
+; so "Spectrum News - Buffalo" still pairs when there is no call sign.
 FindChannelForLocal(channels, parsed) {
     global LocalCallsignMatchThreshold, AliasMatchShowThreshold, AliasMatchCheckThreshold
 
@@ -158,9 +176,14 @@ FindChannelForLocal(channels, parsed) {
         else
             rawScore := ScoreAliasMatch(channel.Name, parsed.Raw)
         netScore := ScoreAliasMatch(channel.Name, parsed.Network)
+        specScore := 0
+        if (parsed.HasOwnProp("SpectrumNews") && parsed.SpectrumNews)
+            specScore := ScoreSpectrumNewsChannel(channel.Name)
 
         score := 0
-        if (callScore >= LocalCallsignMatchThreshold)
+        if (specScore >= LocalCallsignMatchThreshold)
+            score := specScore
+        else if (callScore >= LocalCallsignMatchThreshold)
             score := callScore
         else if (rawScore >= AliasMatchShowThreshold)
             score := rawScore
