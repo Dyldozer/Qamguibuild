@@ -30,6 +30,12 @@ class PasswordManager {
         this.btns := []
         this.detailBox := 0
         this.delayLabel := 0
+        this.unlocked := false
+        this.pwBuf := 0
+        this.iterations := VaultCrypto.Iterations
+        this.lockBtn := 0
+        this.unlockBtn := 0
+        this.changePwBtn := 0
     }
 
     static ConfigActive() {
@@ -47,24 +53,51 @@ class PasswordManager {
     }
 
     Start() {
-        this.Load()
         this.SetupTray()
         Hotkey("!q", this.OnHotkey.Bind(this))
+        this.BootVault()
+        this.UpdateTray()
     }
 
     SetupTray() {
-        A_IconTip := "Password Manager — Alt+Q"
         tray := A_TrayMenu
         tray.Delete()
+        this.unlockBtn := "Unloc&k"
+        this.lockBtn := "&Lock"
+        this.changePwBtn := "Change &master password"
         tray.Add("Open &Config", this.OpenConfig.Bind(this))
+        tray.Add()
+        tray.Add(this.unlockBtn, this.UnlockFromTray.Bind(this))
+        tray.Add(this.lockBtn, this.LockVault.Bind(this))
+        tray.Add(this.changePwBtn, this.ChangeMasterPassword.Bind(this))
         tray.Add()
         tray.Add("&Reload", (*) => Reload())
         tray.Add("E&xit", (*) => ExitApp())
         tray.Default := "Open &Config"
+        this.UpdateTray()
+    }
+
+    UpdateTray() {
+        A_IconTip := this.unlocked ? "Password Manager — unlocked (Alt+Q)" : "Password Manager — locked"
+        tray := A_TrayMenu
+        try {
+            if this.unlocked {
+                tray.Disable(this.unlockBtn)
+                tray.Enable(this.lockBtn)
+                tray.Enable(this.changePwBtn)
+            } else {
+                tray.Enable(this.unlockBtn)
+                tray.Disable(this.lockBtn)
+                tray.Disable(this.changePwBtn)
+            }
+        } catch {
+        }
     }
 
     OnHotkey(*) {
         this.targetHwnd := WinExist("A")
+        if !this.EnsureUnlocked()
+            return
         this.ShowMenu()
     }
 
@@ -160,30 +193,64 @@ class PasswordManager {
         return "https://" url
     }
 
-    Load() {
+    BootVault() {
         this.items := []
         this.sendDelay := 50
-        if !FileExist(this.vaultPath)
+        this.unlocked := false
+        this.ClearPassword()
+        this.iterations := VaultCrypto.Iterations
+        if !FileExist(this.vaultPath) {
+            if !this.PromptCreateMaster("Create a master password to protect the vault.")
+                ExitApp()
+            this.unlocked := true
+            this.Save()
             return
+        }
         try {
             text := FileRead(this.vaultPath, "UTF-8")
-            if Trim(text) = ""
+            if Trim(text) = "" {
+                if !this.PromptCreateMaster("Create a master password to protect the vault.")
+                    ExitApp()
+                this.unlocked := true
+                this.Save()
                 return
+            }
             data := VaultJson.Parse(text)
             if !(data is Map)
                 throw Error("Vault root must be a JSON object")
-            if data.Has("sendDelayMs") && IsNumber(data["sendDelayMs"])
-                this.sendDelay := Max(0, Min(2000, Integer(data["sendDelayMs"])))
-            if data.Has("items") && data["items"] is Array
-                this.items := this.UnpackItems(data["items"])
         } catch as err {
             MsgBox("Could not load vault.json:`n" err.Message, "Password Manager", "Iconx")
-            this.items := []
+            ExitApp()
         }
+        if VaultCrypto.IsEnvelope(data) {
+            if !this.PromptUnlock(data, true)
+                ExitApp()
+            return
+        }
+        try {
+            this.ApplyInner(data, true)
+        } catch as err {
+            MsgBox("Could not load vault.json:`n" err.Message, "Password Manager", "Iconx")
+            ExitApp()
+        }
+        MsgBox("This vault will be upgraded. Usernames and passwords will be encrypted with your master password using PBKDF2-SHA256 and AES-256.", "Password Manager", "Iconi")
+        if !this.PromptCreateMaster("Choose a master password to upgrade the vault.")
+            ExitApp()
+        this.unlocked := true
+        this.Save()
+    }
+
+    ApplyInner(data, allowDpapi := false) {
+        if data.Has("sendDelayMs") && IsNumber(data["sendDelayMs"])
+            this.sendDelay := Max(0, Min(2000, Integer(data["sendDelayMs"])))
+        if data.Has("items") && data["items"] is Array
+            this.items := this.UnpackItems(data["items"], allowDpapi)
+        else
+            this.items := []
     }
 
     Save() {
-        if this.saving
+        if this.saving || !this.unlocked
             return
         this.saving := true
         try {
@@ -196,7 +263,9 @@ class PasswordManager {
             payload["version"] := 1
             payload["sendDelayMs"] := this.sendDelay
             payload["items"] := this.PackItems(this.items)
-            text := VaultJson.Stringify(payload)
+            inner := VaultJson.Stringify(payload)
+            env := VaultCrypto.Seal(inner, this.GetPassword(), this.iterations)
+            text := VaultJson.Stringify(env)
             tmp := this.vaultPath ".tmp"
             f := FileOpen(tmp, "w", "UTF-8-RAW")
             if !f
@@ -205,7 +274,7 @@ class PasswordManager {
             f.Close()
             FileMove(tmp, this.vaultPath, true)
             if this.sb
-                this.sb.SetText("Saved  ·  Alt+Q opens the menu  ·  Config is always last")
+                this.sb.SetText("Saved  ·  vault encrypted  ·  Alt+Q opens the menu")
         } catch as err {
             if this.sb
                 this.sb.SetText("Save failed")
@@ -226,8 +295,8 @@ class PasswordManager {
                 case "submenu":
                     row["items"] := this.PackItems(item.Has("items") ? item["items"] : [])
                 case "login":
-                    row["username"] := this.PackSecret(item.Has("username") ? item["username"] : "")
-                    row["password"] := this.PackSecret(item.Has("password") ? item["password"] : "")
+                    row["username"] := item.Has("username") ? item["username"] : ""
+                    row["password"] := item.Has("password") ? item["password"] : ""
                     row["useTab"] := item.Has("useTab") ? (item["useTab"] ? 1 : 0) : 1
                 case "link":
                     row["url"] := item.Has("url") ? item["url"] : ""
@@ -237,7 +306,7 @@ class PasswordManager {
         return out
     }
 
-    UnpackItems(items) {
+    UnpackItems(items, allowDpapi := false) {
         out := []
         if !(items is Array)
             return out
@@ -251,10 +320,10 @@ class PasswordManager {
             row["name"] := item.Has("name") ? item["name"] : ""
             switch type {
                 case "submenu":
-                    row["items"] := this.UnpackItems(item.Has("items") ? item["items"] : [])
+                    row["items"] := this.UnpackItems(item.Has("items") ? item["items"] : [], allowDpapi)
                 case "login":
-                    row["username"] := this.UnpackSecret(item.Has("username") ? item["username"] : "")
-                    row["password"] := this.UnpackSecret(item.Has("password") ? item["password"] : "")
+                    row["username"] := this.UnpackSecret(item.Has("username") ? item["username"] : "", allowDpapi)
+                    row["password"] := this.UnpackSecret(item.Has("password") ? item["password"] : "", allowDpapi)
                     row["useTab"] := item.Has("useTab") ? (item["useTab"] ? 1 : 0) : 1
                 case "link":
                     row["url"] := item.Has("url") ? item["url"] : ""
@@ -266,19 +335,13 @@ class PasswordManager {
         return out
     }
 
-    PackSecret(text) {
-        if text = ""
-            return ""
-        return Map("dpapi", Dpapi.Protect(text))
-    }
-
-    UnpackSecret(val) {
+    UnpackSecret(val, allowDpapi := false) {
         if val = "" || !IsSet(val)
             return ""
         if val is String
             return val
         if val is Map {
-            if val.Has("dpapi") && val["dpapi"] != ""
+            if allowDpapi && val.Has("dpapi") && val["dpapi"] != ""
                 return Dpapi.Unprotect(val["dpapi"])
             if val.Has("plain")
                 return val["plain"]
@@ -291,6 +354,8 @@ class PasswordManager {
     }
 
     OpenConfig(*) {
+        if !this.EnsureUnlocked()
+            return
         if this.gui {
             this.RefreshTree()
             this.gui.Show()
@@ -866,6 +931,455 @@ class PasswordManager {
             try WinActivate("ahk_id " this.gui.Hwnd)
         }
         this.modalOpen := false
+    }
+
+    EnsureUnlocked() {
+        if this.unlocked
+            return true
+        if !FileExist(this.vaultPath) {
+            if !this.PromptCreateMaster("Create a master password to protect the vault.")
+                return false
+            this.unlocked := true
+            this.Save()
+            this.UpdateTray()
+            return true
+        }
+        try {
+            text := FileRead(this.vaultPath, "UTF-8")
+            data := VaultJson.Parse(text)
+        } catch as err {
+            MsgBox("Could not load vault.json:`n" err.Message, "Password Manager", "Iconx")
+            return false
+        }
+        if !VaultCrypto.IsEnvelope(data) {
+            MsgBox("This vault file is not encrypted. Restart the script to upgrade it.", "Password Manager", "Iconx")
+            return false
+        }
+        return this.PromptUnlock(data, false)
+    }
+
+    UnlockFromTray(*) {
+        this.EnsureUnlocked()
+        this.UpdateTray()
+    }
+
+    LockVault(*) {
+        if !this.unlocked
+            return
+        this.WipeItems(this.items)
+        this.items := []
+        this.ClearPassword()
+        this.unlocked := false
+        if this.showSecrets
+            this.showSecrets.Value := 0
+        if this.gui {
+            this.RefreshTree()
+            this.gui.Hide()
+        }
+        this.UpdateTray()
+    }
+
+    WipeItems(items) {
+        if !(items is Array)
+            return
+        for item in items {
+            if item.Has("username")
+                item["username"] := ""
+            if item.Has("password")
+                item["password"] := ""
+            if item.Has("items")
+                this.WipeItems(item["items"])
+        }
+    }
+
+    StorePassword(pw) {
+        this.ClearPassword()
+        this.pwBuf := Buffer(StrPut(pw, "UTF-16"))
+        StrPut(pw, this.pwBuf, "UTF-16")
+    }
+
+    GetPassword() {
+        if !this.pwBuf
+            return ""
+        return StrGet(this.pwBuf, "UTF-16")
+    }
+
+    ClearPassword() {
+        if this.pwBuf {
+            DllCall("RtlFillMemory", "ptr", this.pwBuf, "uptr", this.pwBuf.Size, "uchar", 0)
+            this.pwBuf := 0
+        }
+    }
+
+    PromptCreateMaster(prompt) {
+        dlg := Gui("-MinimizeBox", "Create master password")
+        dlg.SetFont("s9", "Segoe UI")
+        dlg.AddText("xm w360", prompt)
+        dlg.AddText("xm w360", "Use at least 8 characters. This password encrypts the vault. It cannot be recovered if you forget it.")
+        dlg.AddText("xm w120 h20", "&Password")
+        passEdit := dlg.AddEdit("x+8 yp-2 w220 h22 Password")
+        dlg.AddText("xm w120 h20", "C&onfirm")
+        confirmEdit := dlg.AddEdit("x+8 yp-2 w220 h22 Password")
+        showChk := dlg.AddCheckbox("xm w200 h22", "Show")
+        showChk.OnEvent("Click", (*) => (this.SetPasswordVisible(passEdit, showChk.Value), this.SetPasswordVisible(confirmEdit, showChk.Value)))
+        okBtn := dlg.AddButton("xm w88 h28 Default", "OK")
+        dlg.AddButton("x+8 yp w88 h28", "Cancel").OnEvent("Click", (*) => dlg.Destroy())
+        state := { ok: false }
+        submit := (*) => this.SubmitCreateMaster(dlg, passEdit, confirmEdit, state)
+        okBtn.OnEvent("Click", submit)
+        dlg.OnEvent("Close", (*) => dlg.Destroy())
+        dlg.OnEvent("Escape", (*) => dlg.Destroy())
+        this.RunModal(dlg)
+        return state.ok
+    }
+
+    SubmitCreateMaster(dlg, passEdit, confirmEdit, state) {
+        pw := passEdit.Value
+        confirm := confirmEdit.Value
+        dlg.Opt("+OwnDialogs")
+        if StrLen(pw) < 8 {
+            MsgBox("Use at least 8 characters.", "Create master password", "Iconx")
+            return
+        }
+        if pw != confirm {
+            MsgBox("The passwords do not match.", "Create master password", "Iconx")
+            return
+        }
+        this.StorePassword(pw)
+        state.ok := true
+        dlg.Destroy()
+    }
+
+    PromptUnlock(env, required) {
+        loop {
+            dlg := Gui("-MinimizeBox", "Unlock vault")
+            dlg.SetFont("s9", "Segoe UI")
+            dlg.AddText("xm w340", "Enter the master password to decrypt usernames and passwords.")
+            dlg.AddText("xm w120 h20", "&Password")
+            passEdit := dlg.AddEdit("x+8 yp-2 w220 h22 Password")
+            showChk := dlg.AddCheckbox("xm w200 h22", "Show")
+            showChk.OnEvent("Click", (*) => this.SetPasswordVisible(passEdit, showChk.Value))
+            statusText := dlg.AddText("xm w340 h20", "")
+            okBtn := dlg.AddButton("xm w88 h28 Default", "Unlock")
+            dlg.AddButton("x+8 yp w88 h28", "Cancel").OnEvent("Click", (*) => dlg.Destroy())
+            state := { ok: false, pw: "" }
+            submit := (*) => this.SubmitUnlock(dlg, passEdit, statusText, okBtn, state)
+            okBtn.OnEvent("Click", submit)
+            dlg.OnEvent("Close", (*) => dlg.Destroy())
+            dlg.OnEvent("Escape", (*) => dlg.Destroy())
+            this.RunModal(dlg)
+            if !state.ok {
+                if required
+                    return false
+                return this.unlocked
+            }
+            try {
+                innerText := VaultCrypto.Unseal(env, state.pw)
+                inner := VaultJson.Parse(innerText)
+                this.ApplyInner(inner, false)
+                if env.Has("iterations") && IsNumber(env["iterations"])
+                    this.iterations := Integer(env["iterations"])
+                this.StorePassword(state.pw)
+                this.unlocked := true
+                if this.delayEdit
+                    this.delayEdit.Value := this.sendDelay
+                this.UpdateTray()
+                if this.gui
+                    this.RefreshTree()
+                return true
+            } catch {
+                MsgBox("Wrong master password, or the vault file is damaged.", "Unlock vault", "Iconx")
+            }
+        }
+    }
+
+    SubmitUnlock(dlg, passEdit, statusText, okBtn, state) {
+        pw := passEdit.Value
+        if pw = "" {
+            dlg.Opt("+OwnDialogs")
+            MsgBox("Enter the master password.", "Unlock vault", "Iconx")
+            return
+        }
+        statusText.Value := "Deriving key…"
+        okBtn.Enabled := false
+        dlg.Opt("+Disabled")
+        state.ok := true
+        state.pw := pw
+        dlg.Destroy()
+    }
+
+    ChangeMasterPassword(*) {
+        if !this.EnsureUnlocked()
+            return
+        dlg := Gui("-MinimizeBox", "Change master password")
+        dlg.SetFont("s9", "Segoe UI")
+        dlg.AddText("xm w120 h20", "C&urrent")
+        currentEdit := dlg.AddEdit("x+8 yp-2 w220 h22 Password")
+        dlg.AddText("xm w120 h20", "&New")
+        passEdit := dlg.AddEdit("x+8 yp-2 w220 h22 Password")
+        dlg.AddText("xm w120 h20", "C&onfirm")
+        confirmEdit := dlg.AddEdit("x+8 yp-2 w220 h22 Password")
+        showChk := dlg.AddCheckbox("xm w200 h22", "Show")
+        showChk.OnEvent("Click", (*) => (this.SetPasswordVisible(currentEdit, showChk.Value), this.SetPasswordVisible(passEdit, showChk.Value), this.SetPasswordVisible(confirmEdit, showChk.Value)))
+        okBtn := dlg.AddButton("xm w88 h28 Default", "OK")
+        dlg.AddButton("x+8 yp w88 h28", "Cancel").OnEvent("Click", (*) => dlg.Destroy())
+        state := { ok: false }
+        submit := (*) => this.SubmitChangeMaster(dlg, currentEdit, passEdit, confirmEdit, state)
+        okBtn.OnEvent("Click", submit)
+        dlg.OnEvent("Close", (*) => dlg.Destroy())
+        dlg.OnEvent("Escape", (*) => dlg.Destroy())
+        this.RunModal(dlg)
+        if state.ok
+            this.Save()
+    }
+
+    SubmitChangeMaster(dlg, currentEdit, passEdit, confirmEdit, state) {
+        current := currentEdit.Value
+        pw := passEdit.Value
+        confirm := confirmEdit.Value
+        dlg.Opt("+OwnDialogs")
+        if current != this.GetPassword() {
+            MsgBox("The current master password is wrong.", "Change master password", "Iconx")
+            return
+        }
+        if StrLen(pw) < 8 {
+            MsgBox("Use at least 8 characters.", "Change master password", "Iconx")
+            return
+        }
+        if pw != confirm {
+            MsgBox("The new passwords do not match.", "Change master password", "Iconx")
+            return
+        }
+        this.StorePassword(pw)
+        state.ok := true
+        dlg.Destroy()
+    }
+}
+
+class VaultCrypto {
+    static Iterations := 210000
+
+    static IsEnvelope(data) {
+        return data is Map
+            && data.Has("data") && data["data"] != ""
+            && data.Has("salt") && data.Has("iv") && data.Has("hmac")
+    }
+
+    static Seal(plainText, password, iterations) {
+        salt := VaultCrypto.RandomBytes(16)
+        iv := VaultCrypto.RandomBytes(16)
+        keys := VaultCrypto.DeriveKeys(password, salt, iterations)
+        try {
+            plain := VaultCrypto.Utf8(plainText)
+            cipher := VaultCrypto.AesCbc(keys.aes, iv, plain, true)
+            mac := VaultCrypto.HmacSha256(keys.mac, VaultCrypto.Concat(iv, cipher))
+            env := Map()
+            env["version"] := 2
+            env["kdf"] := "pbkdf2-sha256"
+            env["iterations"] := iterations
+            env["cipher"] := "aes-256-cbc"
+            env["salt"] := VaultCrypto.ToBase64(salt)
+            env["iv"] := VaultCrypto.ToBase64(iv)
+            env["hmac"] := VaultCrypto.ToBase64(mac)
+            env["data"] := VaultCrypto.ToBase64(cipher)
+            return env
+        } finally {
+            VaultCrypto.Zero(keys.aes)
+            VaultCrypto.Zero(keys.mac)
+        }
+    }
+
+    static Unseal(env, password) {
+        if !env.Has("kdf") || env["kdf"] != "pbkdf2-sha256"
+            throw Error("Unsupported vault key derivation")
+        if env.Has("cipher") && env["cipher"] != "aes-256-cbc"
+            throw Error("Unsupported vault cipher")
+        iterations := env.Has("iterations") && IsNumber(env["iterations"]) ? Integer(env["iterations"]) : VaultCrypto.Iterations
+        if iterations < 10000 || iterations > 5000000
+            throw Error("Invalid KDF iterations")
+        salt := VaultCrypto.FromBase64(env["salt"])
+        iv := VaultCrypto.FromBase64(env["iv"])
+        wantMac := VaultCrypto.FromBase64(env["hmac"])
+        cipher := VaultCrypto.FromBase64(env["data"])
+        keys := VaultCrypto.DeriveKeys(password, salt, iterations)
+        try {
+            gotMac := VaultCrypto.HmacSha256(keys.mac, VaultCrypto.Concat(iv, cipher))
+            if !VaultCrypto.Equal(wantMac, gotMac)
+                throw Error("Wrong master password")
+            plain := VaultCrypto.AesCbc(keys.aes, iv, cipher, false)
+            return StrGet(plain, "UTF-8")
+        } finally {
+            VaultCrypto.Zero(keys.aes)
+            VaultCrypto.Zero(keys.mac)
+        }
+    }
+
+    static DeriveKeys(password, saltBuf, iterations) {
+        hAlg := 0
+        status := DllCall("bcrypt\BCryptOpenAlgorithmProvider", "ptr*", &hAlg, "wstr", "SHA256", "ptr", 0, "uint", 8, "uint")
+        VaultCrypto.Nt(status, "Could not open SHA256 for PBKDF2")
+        pwBuf := VaultCrypto.Utf8(password)
+        derived := Buffer(64, 0)
+        try {
+            status := DllCall("bcrypt\BCryptDeriveKeyPBKDF2",
+                "ptr", hAlg,
+                "ptr", pwBuf, "uint", pwBuf.Size,
+                "ptr", saltBuf, "uint", saltBuf.Size,
+                "int64", iterations,
+                "ptr", derived, "uint", derived.Size,
+                "uint", 0,
+                "uint")
+            VaultCrypto.Nt(status, "Could not derive the vault key")
+            aesKey := Buffer(32)
+            macKey := Buffer(32)
+            DllCall("RtlMoveMemory", "ptr", aesKey, "ptr", derived, "uptr", 32)
+            DllCall("RtlMoveMemory", "ptr", macKey, "ptr", derived.Ptr + 32, "uptr", 32)
+            return { aes: aesKey, mac: macKey }
+        } finally {
+            DllCall("bcrypt\BCryptCloseAlgorithmProvider", "ptr", hAlg, "uint", 0)
+            VaultCrypto.Zero(pwBuf)
+            VaultCrypto.Zero(derived)
+        }
+    }
+
+    static AesCbc(keyBuf, ivSrc, dataBuf, encrypt) {
+        hAlg := 0
+        status := DllCall("bcrypt\BCryptOpenAlgorithmProvider", "ptr*", &hAlg, "wstr", "AES", "ptr", 0, "uint", 0, "uint")
+        VaultCrypto.Nt(status, "Could not open AES")
+        hKey := 0
+        try {
+            status := DllCall("bcrypt\BCryptSetProperty",
+                "ptr", hAlg,
+                "ptr", StrPtr("ChainingMode"),
+                "ptr", StrPtr("ChainingModeCBC"),
+                "uint", StrPut("ChainingModeCBC", "UTF-16"),
+                "uint", 0,
+                "uint")
+            VaultCrypto.Nt(status, "Could not set AES CBC mode")
+            status := DllCall("bcrypt\BCryptGenerateSymmetricKey",
+                "ptr", hAlg, "ptr*", &hKey, "ptr", 0, "uint", 0,
+                "ptr", keyBuf, "uint", keyBuf.Size, "uint", 0, "uint")
+            VaultCrypto.Nt(status, "Could not create the AES key")
+            fn := encrypt ? "bcrypt\BCryptEncrypt" : "bcrypt\BCryptDecrypt"
+            flags := 1
+            iv := VaultCrypto.CopyBuf(ivSrc)
+            cbOut := 0
+            status := DllCall(fn, "ptr", hKey, "ptr", dataBuf, "uint", dataBuf.Size, "ptr", 0,
+                "ptr", iv, "uint", iv.Size, "ptr", 0, "uint", 0, "uint*", &cbOut, "uint", flags, "uint")
+            VaultCrypto.Nt(status, encrypt ? "Could not encrypt the vault" : "Could not decrypt the vault")
+            out := Buffer(cbOut)
+            iv := VaultCrypto.CopyBuf(ivSrc)
+            status := DllCall(fn, "ptr", hKey, "ptr", dataBuf, "uint", dataBuf.Size, "ptr", 0,
+                "ptr", iv, "uint", iv.Size, "ptr", out, "uint", out.Size, "uint*", &cbOut, "uint", flags, "uint")
+            VaultCrypto.Nt(status, encrypt ? "Could not encrypt the vault" : "Could not decrypt the vault")
+            out.Size := cbOut
+            return out
+        } finally {
+            if hKey
+                DllCall("bcrypt\BCryptDestroyKey", "ptr", hKey)
+            DllCall("bcrypt\BCryptCloseAlgorithmProvider", "ptr", hAlg, "uint", 0)
+        }
+    }
+
+    static HmacSha256(keyBuf, dataBuf) {
+        hAlg := 0
+        status := DllCall("bcrypt\BCryptOpenAlgorithmProvider", "ptr*", &hAlg, "wstr", "SHA256", "ptr", 0, "uint", 8, "uint")
+        VaultCrypto.Nt(status, "Could not open SHA256-HMAC")
+        hHash := 0
+        try {
+            status := DllCall("bcrypt\BCryptCreateHash",
+                "ptr", hAlg, "ptr*", &hHash, "ptr", 0, "uint", 0,
+                "ptr", keyBuf, "uint", keyBuf.Size, "uint", 0, "uint")
+            VaultCrypto.Nt(status, "Could not create HMAC")
+            status := DllCall("bcrypt\BCryptHashData", "ptr", hHash, "ptr", dataBuf, "uint", dataBuf.Size, "uint", 0, "uint")
+            VaultCrypto.Nt(status, "Could not hash vault data")
+            out := Buffer(32)
+            status := DllCall("bcrypt\BCryptFinishHash", "ptr", hHash, "ptr", out, "uint", 32, "uint", 0, "uint")
+            VaultCrypto.Nt(status, "Could not finish HMAC")
+            return out
+        } finally {
+            if hHash
+                DllCall("bcrypt\BCryptDestroyHash", "ptr", hHash)
+            DllCall("bcrypt\BCryptCloseAlgorithmProvider", "ptr", hAlg, "uint", 0)
+        }
+    }
+
+    static RandomBytes(n) {
+        buf := Buffer(n)
+        status := DllCall("bcrypt\BCryptGenRandom", "ptr", 0, "ptr", buf, "uint", n, "uint", 2, "uint")
+        VaultCrypto.Nt(status, "Could not get random bytes")
+        return buf
+    }
+
+    static Utf8(text) {
+        enc := StrPut(text, "UTF-8")
+        src := Buffer(enc)
+        StrPut(text, src, "UTF-8")
+        out := Buffer(enc - 1)
+        if out.Size
+            DllCall("RtlMoveMemory", "ptr", out, "ptr", src, "uptr", out.Size)
+        return out
+    }
+
+    static CopyBuf(src) {
+        out := Buffer(src.Size)
+        if src.Size
+            DllCall("RtlMoveMemory", "ptr", out, "ptr", src, "uptr", src.Size)
+        return out
+    }
+
+    static Concat(a, b) {
+        out := Buffer(a.Size + b.Size)
+        if a.Size
+            DllCall("RtlMoveMemory", "ptr", out, "ptr", a, "uptr", a.Size)
+        if b.Size
+            DllCall("RtlMoveMemory", "ptr", out.Ptr + a.Size, "ptr", b, "uptr", b.Size)
+        return out
+    }
+
+    static Zero(buf) {
+        if buf && buf.Size
+            DllCall("RtlFillMemory", "ptr", buf, "uptr", buf.Size, "uchar", 0)
+    }
+
+    static Equal(a, b) {
+        if a.Size != b.Size
+            return false
+        diff := 0
+        i := 0
+        while i < a.Size {
+            diff |= NumGet(a, i, "UChar") ^ NumGet(b, i, "UChar")
+            i++
+        }
+        return diff = 0
+    }
+
+    static Nt(status, msg) {
+        if status
+            throw Error(msg, -1, status)
+    }
+
+    static ToBase64(buf) {
+        flags := 0x40000001
+        chars := 0
+        if !DllCall("Crypt32\CryptBinaryToStringW", "ptr", buf, "uint", buf.Size, "uint", flags, "ptr", 0, "uint*", &chars)
+            throw Error("Base64 encode failed")
+        out := Buffer(chars * 2)
+        if !DllCall("Crypt32\CryptBinaryToStringW", "ptr", buf, "uint", buf.Size, "uint", flags, "ptr", out, "uint*", &chars)
+            throw Error("Base64 encode failed")
+        return StrGet(out, "UTF-16")
+    }
+
+    static FromBase64(s) {
+        flags := 1
+        bytes := 0
+        if !DllCall("Crypt32\CryptStringToBinaryW", "wstr", s, "uint", 0, "uint", flags, "ptr", 0, "uint*", &bytes, "ptr", 0, "ptr", 0)
+            throw Error("Invalid encrypted data")
+        buf := Buffer(bytes)
+        if !DllCall("Crypt32\CryptStringToBinaryW", "wstr", s, "uint", 0, "uint", flags, "ptr", buf, "uint*", &bytes, "ptr", 0, "ptr", 0)
+            throw Error("Invalid encrypted data")
+        buf.Size := bytes
+        return buf
     }
 }
 

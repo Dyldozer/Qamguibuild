@@ -10,8 +10,11 @@ Standalone Alt+Q menu for usernames/passwords and links. It lives in this folder
 ## Run
 
 1. Double-click `PasswordManager.ahk` (or run it with AutoHotkey v2).
-2. The script stays in the tray. There is no main window until you open Config.
-3. Press **Alt+Q** to open the menu.
+2. Create a master password (new vault) or enter it to unlock (existing vault).
+3. The script stays in the tray. There is no main window until you open Config.
+4. Press **Alt+Q** to open the menu.
+
+The tray menu can **Lock** the vault (clears secrets from memory) and **Change master password**. Lock or Alt+Q while locked asks for the master password again.
 
 ## Menu
 
@@ -58,14 +61,23 @@ Double-click an item to edit it. Right-click the tree for the same actions as th
 
 ## Storage
 
-The vault is `password-manager/vault.json`.
+The vault is `password-manager/vault.json` (gitignored).
 
-- Menu names, structure, and URLs are stored as JSON
-- Usernames and passwords are encrypted with **Windows DPAPI** for the current Windows user
-- The same Windows account that saved the vault is the only one that can decrypt it
-- `vault.json` is gitignored so secrets are not committed
+SHA-256 is a hash, not an encryption algorithm, so it cannot lock and later read a vault by itself. The script uses SHA-256 the way a password manager should:
 
-This is a local filler, not a synced password manager. Keep a backup of `vault.json` if you care about the data, and do not copy it to another Windows account expecting the secrets to open.
+1. You enter a **master password**
+2. **PBKDF2-HMAC-SHA256** (210,000 iterations, random salt) stretches that password into keys
+3. The full vault JSON is encrypted with **AES-256-CBC**
+4. An **HMAC-SHA256** tag detects a wrong password or a tampered file
+
+The file on disk only has public parameters (salt, IV, iteration count) plus ciphertext. Names, URLs, usernames, and passwords are inside the encrypted blob.
+
+- The master password is not stored. If you forget it, the vault cannot be opened.
+- Use at least 8 characters; a longer random passphrase is better.
+- After unlock, secrets are in memory so Alt+Q can type them. Use **Lock** when you step away.
+- An older DPAPI vault is upgraded the first time you set a master password.
+
+This is a local filler, not a synced password manager. Keep a backup of `vault.json` if you care about the data. The backup is only useful if you also remember the master password.
 
 ## Assumptions
 
@@ -75,5 +87,5 @@ These defaults were chosen so the script can ship without a setup wizard:
 - Config is only on the root menu, always last
 - Login fills the previously active window with `SendText`
 - Links with no scheme get `https://`
-- No master password beyond DPAPI
+- Master password encrypts the whole vault (PBKDF2-SHA256 + AES-256); there is no recovery
 - Empty submenus show a disabled `(empty)` placeholder in the popup
