@@ -60,6 +60,12 @@ StartGui() {
     g.AddText("xm y+10", "Referer (optional)")
     Ui.Referer := g.AddEdit("xm y+4 w718")
 
+    g.AddText("xm y+10", "Authorization")
+    g.AddText("xm y+6", "Username")
+    Ui.Username := g.AddEdit("x+8 yp-2 w240")
+    g.AddText("x+16 yp+2", "Password")
+    Ui.Password := g.AddEdit("x+8 yp-2 w240 Password")
+
     g.AddText("xm y+10", "Part content type")
     Ui.PartType := g.AddEdit("x+8 yp-2 w160", DEFAULT_PART_TYPE)
     Ui.SendPartType := g.AddCheckbox("x+12 yp+2 Checked", "Send part type")
@@ -88,13 +94,15 @@ StartGui() {
     Ui.Url.Value := saved.Url
     Ui.Cookie.Value := saved.Cookie
     Ui.Referer.Value := saved.Referer
+    Ui.Username.Value := saved.Username
+    Ui.Password.Value := saved.Password
     Ui.PartType.Value := saved.PartType
     Ui.SendPartType.Value := saved.SendPartType
     Ui.IgnoreTls.Value := saved.IgnoreTls
     Ui.Headers.Value := ToEditNewlines(saved.ExtraHeaders)
     Ui.Replacement.Value := ToEditNewlines(saved.Replacement)
 
-    g.Show("w760 h740")
+    g.Show("w760 h790")
 }
 
 CloseGui(*) {
@@ -174,6 +182,10 @@ RunJob(doUpload) {
             Log("Cookie: (set)")
         else
             Log("Cookie: (none)")
+        if (AuthorizationHeader(form.Username, form.Password) != "")
+            Log("Authorization: Basic (set)")
+        else
+            Log("Authorization: (none)")
         response := PostImport(form, result.bytes)
         Log("HTTP " response.status " " response.statusText)
         if (response.finalUrl != "")
@@ -198,7 +210,7 @@ RunJob(doUpload) {
 
 SetBusy(busy) {
     global Ui
-    names := ["Xml", "SourceId", "UploadName", "Url", "Cookie", "Referer", "PartType", "Headers", "Replacement", "IgnoreTls", "SendPartType", "RewriteBtn", "UploadBtn", "BrowseBtn"]
+    names := ["Xml", "SourceId", "UploadName", "Url", "Cookie", "Referer", "Username", "Password", "PartType", "Headers", "Replacement", "IgnoreTls", "SendPartType", "RewriteBtn", "UploadBtn", "BrowseBtn"]
     for name in names {
         ctrl := Ui.%name%
         if (IsObject(ctrl))
@@ -217,6 +229,8 @@ CollectForm() {
         Url: Trim(Ui.Url.Value),
         Cookie: Trim(Ui.Cookie.Value, " `t`r`n"),
         Referer: Trim(Ui.Referer.Value),
+        Username: CleanCredential(Ui.Username.Value, true),
+        Password: CleanCredential(Ui.Password.Value, false),
         PartType: partType,
         SendPartType: sendPartType,
         IgnoreTls: Ui.IgnoreTls.Value ? true : false,
@@ -732,6 +746,48 @@ BuildMultipart(fileBytes, filename, partType) {
     }
 }
 
+CleanCredential(value, trimEdges) {
+    value := StrReplace(value, "`r", "")
+    value := StrReplace(value, "`n", "")
+    if (trimEdges)
+        value := Trim(value, " `t")
+    return value
+}
+
+; Base64 of the UTF-8 bytes of "username:password", used as:
+; Authorization: Basic {Basic64Encode("username:password")}
+Basic64Encode(text) {
+    data := EncodePayload(text, "utf-8")
+    alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    out := ""
+    i := 0
+    n := data.Size
+    while (i < n) {
+        b0 := NumGet(data, i, "UChar")
+        b1 := (i + 1 < n) ? NumGet(data, i + 1, "UChar") : 0
+        b2 := (i + 2 < n) ? NumGet(data, i + 2, "UChar") : 0
+        triple := (b0 << 16) | (b1 << 8) | b2
+        out .= SubStr(alphabet, ((triple >> 18) & 63) + 1, 1)
+        out .= SubStr(alphabet, ((triple >> 12) & 63) + 1, 1)
+        if (i + 1 < n)
+            out .= SubStr(alphabet, ((triple >> 6) & 63) + 1, 1)
+        else
+            out .= "="
+        if (i + 2 < n)
+            out .= SubStr(alphabet, (triple & 63) + 1, 1)
+        else
+            out .= "="
+        i += 3
+    }
+    return out
+}
+
+AuthorizationHeader(username, password) {
+    if (username == "" && password == "")
+        return ""
+    return "Basic " Basic64Encode(username ":" password)
+}
+
 RandomBoundary() {
     chars := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
     out := "----QamXmlImport"
@@ -757,6 +813,9 @@ PostImport(form, fileBytes) {
     if (form.Referer != "")
         whr.SetRequestHeader("Referer", form.Referer)
     ApplyExtraHeaders(whr, form.ExtraHeaders)
+    auth := AuthorizationHeader(form.Username, form.Password)
+    if (auth != "")
+        whr.SetRequestHeader("Authorization", auth)
     try
         whr.Send(BufferToSafeArray(packed.body))
     catch as err
@@ -802,6 +861,8 @@ ApplyExtraHeaders(whr, text) {
         blocked := StrLower(name)
         if (blocked == "content-type" || blocked == "content-length" || blocked == "host")
             throw Error("The " name " header is set by the upload itself.")
+        if (blocked == "authorization")
+            throw Error("Put the username and password in the Authorization boxes.")
         whr.SetRequestHeader(name, value)
     }
 }
@@ -850,6 +911,8 @@ LoadSettings() {
         Url: ReadIni("Url", ""),
         Cookie: ReadIni("Cookie", ""),
         Referer: ReadIni("Referer", ""),
+        Username: ReadIni("Username", ""),
+        Password: ReadIni("Password", ""),
         PartType: ReadIni("PartType", DEFAULT_PART_TYPE),
         SendPartType: ReadIni("SendPartType", "1") != "0",
         IgnoreTls: ReadIni("IgnoreTls", "1") != "0",
@@ -875,6 +938,8 @@ SaveSettings(form) {
     WriteIni("Url", form.Url)
     WriteIni("Cookie", form.Cookie)
     WriteIni("Referer", form.Referer)
+    WriteIni("Username", form.Username)
+    WriteIni("Password", form.Password)
     WriteIni("PartType", form.PartType == "" ? DEFAULT_PART_TYPE : form.PartType)
     WriteIni("SendPartType", form.SendPartType ? "1" : "0")
     WriteIni("IgnoreTls", form.IgnoreTls ? "1" : "0")
@@ -932,6 +997,7 @@ RunSelfTest() {
         TestUtf8ReplacementAndHighByte()
         TestMissingTagsThrow()
         TestMultipartPackaging()
+        TestBasicAuthorization()
         TestSourceIdValidation()
         TestRawRoundTrip()
     } catch as err {
@@ -1084,6 +1150,17 @@ TestRawRoundTrip() {
     result := RewriteXml(loaded, "PLACEHOLDER", "8")
     expected := Concat(Ascii("PLACEHOLDER<Source_ID>8</Source_ID>"), Raw([0xFF, 0x00]))
     AssertBuf(result.bytes, expected, "raw round trip")
+}
+
+TestBasicAuthorization() {
+    AssertTrue(Basic64Encode("f") == "Zg==", "base64 one byte")
+    AssertTrue(Basic64Encode("fo") == "Zm8=", "base64 two bytes")
+    AssertTrue(Basic64Encode("foo") == "Zm9v", "base64 three bytes")
+    AssertTrue(Basic64Encode("username:password") == "dXNlcm5hbWU6cGFzc3dvcmQ=", "base64 username:password")
+    AssertTrue(Basic64Encode(Chr(0xE9) ":" Chr(0xE9)) == "w6k6w6k=", "base64 utf-8 credentials")
+    AssertTrue(AuthorizationHeader("", "") == "", "blank authorization omitted")
+    AssertTrue(AuthorizationHeader("username", "password") == "Basic dXNlcm5hbWU6cGFzc3dvcmQ=", "authorization header")
+    AssertTrue(AuthorizationHeader("", "password") == "Basic OnBhc3N3b3Jk", "password only")
 }
 
 TestSourceIdValidation() {
