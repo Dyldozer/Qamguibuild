@@ -6,12 +6,12 @@ It reads an XML export, changes only two things, writes a new file, and can uplo
 
 ## What it changes
 
-1. Everything between the first `<QAM_Mapping view="Mappings">` and the last `</QAM_Mapping>` in the file is replaced. The two tags stay. The text in the box (or in `MappingReplacement.txt`) is inserted exactly. Until you replace it, that text is `PLACEHOLDER`.
+1. The first `<QAM_Mapping view="Mappings">`, the last `</QAM_Mapping>`, and everything between them are replaced. Both tags are included. The text in the box (or in `MappingReplacement.txt`) is inserted exactly in their place. Until you replace it, that text is `PLACEHOLDER`.
 2. The number inside each `<Source_ID>...</Source_ID>` in the finished file is replaced with the Source ID you type. Whitespace around the number stays. Anything that is not that number stays.
 
 Bytes outside those edits are copied as they are. The original XML is not overwritten. The new file is saved next to it as `<name>.modified.xml`.
 
-Run it on a fresh export. The inserted mapping text can itself contain `</QAM_Mapping>`, and a second run would then treat that as the last closing tag.
+Run it on a fresh export. When you add the real mapping text, include the `<QAM_Mapping view="Mappings">` and `</QAM_Mapping>` tags in that text if the file should still contain them. A second run treats the first opening tag and the last closing tag in the file as the block to replace again.
 
 ## What it uploads
 
@@ -53,7 +53,7 @@ These are the choices the script makes where the browser request was not fully s
 - The body is the rewritten XML, not a zip. The field name is `Import`. The part `Content-Type` is sent only while **Send part type** is checked.
 - A logged-in session is supplied by pasting `Cookie`, `Referer`, and any other request headers.
 - `Source_ID` numbers inside the old mapping block disappear with that block. Numbers in the new text, and numbers outside the block, are updated.
-- The opening tag must match `<QAM_Mapping view="Mappings">` exactly. The closing tag is the last `</QAM_Mapping>` in the file, not only the matching pair.
+- The opening tag must match `<QAM_Mapping view="Mappings">` exactly. The block runs through the last `</QAM_Mapping>` in the file, and both tags are part of what is replaced.
 - The file encoding can be UTF-8, UTF-16 LE, UTF-16 BE, windows-1252, or ISO-8859-1. Any other declared encoding is left byte-for-byte, and the replacement text then has to be ASCII.
 
 ## Check the rewriter

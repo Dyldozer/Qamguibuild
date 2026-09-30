@@ -5,8 +5,8 @@
 ; Does not include or call any other script in this repo.
 ;
 ; Two edits, and nothing else:
-;   1. Replace the bytes between the first <QAM_Mapping view="Mappings">
-;      and the last </QAM_Mapping> with the replacement text.
+;   1. Replace the first <QAM_Mapping view="Mappings">, the last
+;      </QAM_Mapping>, and everything between them with the replacement text.
 ;   2. Replace the number inside each <Source_ID>...</Source_ID>.
 ; The rest of the file is copied byte for byte, then the result can be
 ; POSTed as multipart field "Import".
@@ -69,7 +69,7 @@ StartGui() {
     Ui.Headers := g.AddEdit("xm y+4 w718 r3 Multi")
     SendMessage(0xC5, 1000000, 0, Ui.Headers.Hwnd)
 
-    g.AddText("xm y+10", "Text inserted between the QAM_Mapping tags")
+    g.AddText("xm y+10", "Text that replaces the QAM_Mapping block, including both tags")
     Ui.Replacement := g.AddEdit("xm y+4 w718 r5 Multi WantReturn")
     SendMessage(0xC5, 20000000, 0, Ui.Replacement.Hwnd)
 
@@ -157,8 +157,8 @@ RunJob(doUpload) {
 
         WriteRaw(outPath, result.bytes)
         Log("Encoding: " result.encoding)
-        Log("Replaced the QAM_Mapping body at bytes " result.mappingStart "-" result.mappingEnd
-            . " (" result.interiorBytesRemoved " bytes removed, " result.replacementBytes " bytes inserted).")
+        Log("Replaced the QAM_Mapping block, including both tags, at bytes " result.mappingStart "-" (result.mappingEnd - 1)
+            . " (" result.bytesRemoved " bytes removed, " result.replacementBytes " bytes inserted).")
         Log("Source_ID numbers updated: " result.sourceIdsReplaced)
         if (result.sourceIdsWithoutNumber > 0)
             Log("Source_ID tags left unchanged because they had no number: " result.sourceIdsWithoutNumber)
@@ -294,15 +294,14 @@ RewriteXml(fileBuf, replacementText, newSourceId) {
     if (closeAt < 0)
         throw Error("Could not find </QAM_Mapping> after <QAM_Mapping view=`"Mappings`">.")
 
-    interior := Slice(fileBuf, searchFrom, closeAt)
-    removedIds := CountSourceIds(interior, enc)
+    blockEnd := closeAt + closePat.Size
+    removed := Slice(fileBuf, openAt, blockEnd)
+    removedIds := CountSourceIds(removed, enc)
     replPat := EncodePayload(replacementText, enc)
     spliced := Concat(
         Slice(fileBuf, 0, openAt),
-        openPat,
         replPat,
-        closePat,
-        Slice(fileBuf, closeAt + closePat.Size, fileBuf.Size))
+        Slice(fileBuf, blockEnd, fileBuf.Size))
     ids := ReplaceAllSourceIds(spliced, enc, newSourceId)
     return {
         bytes: ids.bytes,
@@ -310,10 +309,10 @@ RewriteXml(fileBuf, replacementText, newSourceId) {
         sourceIdsReplaced: ids.sourceIdsReplaced,
         sourceIdsWithoutNumber: ids.sourceIdsWithoutNumber,
         sourceIdsRemovedWithMapping: removedIds,
-        interiorBytesRemoved: interior.Size,
+        bytesRemoved: removed.Size,
         replacementBytes: replPat.Size,
         mappingStart: openAt,
-        mappingEnd: closeAt + closePat.Size
+        mappingEnd: blockEnd
     }
 }
 
@@ -959,7 +958,7 @@ TestBasicSpliceKeepsOutsideBytes() {
     expected := Concat(
         Raw([0xFF, 0x00, 0xFE]),
         Ascii("<note>keep</note><Source_ID>99</Source_ID>"),
-        Ascii(OPEN_TAG "PLACEHOLDER" CLOSE_TAG),
+        Ascii("PLACEHOLDER"),
         Raw([0x10, 0x80]),
         Ascii("<Source_ID>99</Source_ID>END"))
     AssertBuf(result.bytes, expected, "basic splice")
@@ -970,14 +969,14 @@ TestBasicSpliceKeepsOutsideBytes() {
 TestFirstOpenAndLastClose() {
     input := Ascii("PRE</QAM_Mapping>" OPEN_TAG "A" CLOSE_TAG "MID" OPEN_TAG "B" CLOSE_TAG "POST")
     result := RewriteXml(input, "PLACEHOLDER", "1")
-    expected := Ascii("PRE</QAM_Mapping>" OPEN_TAG "PLACEHOLDER" CLOSE_TAG "POST")
+    expected := Ascii("PRE</QAM_Mapping>PLACEHOLDERPOST")
     AssertBuf(result.bytes, expected, "first open last close")
 }
 
 TestSourceIdWhitespaceAndSkippedText() {
     input := Ascii("<Source_ID>  12  </Source_ID><Source_ID>none</Source_ID>" OPEN_TAG "X" CLOSE_TAG "<Source_ID>-4-</Source_ID>")
     result := RewriteXml(input, "PLACEHOLDER", "34")
-    expected := Ascii("<Source_ID>  34  </Source_ID><Source_ID>none</Source_ID>" OPEN_TAG "PLACEHOLDER" CLOSE_TAG "<Source_ID>-34-</Source_ID>")
+    expected := Ascii("<Source_ID>  34  </Source_ID><Source_ID>none</Source_ID>PLACEHOLDER<Source_ID>-34-</Source_ID>")
     AssertBuf(result.bytes, expected, "whitespace and non-digits")
     AssertTrue(result.sourceIdsReplaced == 2, "whitespace replaced count")
     AssertTrue(result.sourceIdsWithoutNumber == 1, "skipped non-digit count")
@@ -986,7 +985,7 @@ TestSourceIdWhitespaceAndSkippedText() {
 TestLeadingZerosAndInsideMapping() {
     input := Ascii(OPEN_TAG "<Source_ID>5</Source_ID>" CLOSE_TAG "<Source_ID>6</Source_ID>")
     result := RewriteXml(input, "PLACEHOLDER", "007")
-    expected := Ascii(OPEN_TAG "PLACEHOLDER" CLOSE_TAG "<Source_ID>007</Source_ID>")
+    expected := Ascii("PLACEHOLDER<Source_ID>007</Source_ID>")
     AssertBuf(result.bytes, expected, "leading zeros")
     AssertTrue(result.sourceIdsRemovedWithMapping == 1, "removed with mapping")
     AssertTrue(result.sourceIdsReplaced == 1, "outside id replaced")
@@ -995,13 +994,13 @@ TestLeadingZerosAndInsideMapping() {
 TestReplacementSourceIdIsUpdated() {
     input := Ascii("<Source_ID>2</Source_ID>" OPEN_TAG "OLD" CLOSE_TAG)
     result := RewriteXml(input, "X<Source_ID>1</Source_ID>Y", "9")
-    expected := Ascii("<Source_ID>9</Source_ID>" OPEN_TAG "X<Source_ID>9</Source_ID>Y" CLOSE_TAG)
+    expected := Ascii("<Source_ID>9</Source_ID>X<Source_ID>9</Source_ID>Y")
     AssertBuf(result.bytes, expected, "replacement source id")
 }
 
 TestUtf16LeBom() {
     payload := "<Source_ID>5</Source_ID>" OPEN_TAG "ZZ" CLOSE_TAG "OK"
-    expectedText := "<Source_ID>123</Source_ID>" OPEN_TAG "PLACEHOLDER" CLOSE_TAG "OK"
+    expectedText := "<Source_ID>123</Source_ID>PLACEHOLDEROK"
     input := Concat(Raw([0xFF, 0xFE]), EncodeAscii(payload, "utf-16le"))
     result := RewriteXml(input, "PLACEHOLDER", "123")
     expected := Concat(Raw([0xFF, 0xFE]), EncodeAscii(expectedText, "utf-16le"))
@@ -1012,7 +1011,7 @@ TestUtf16LeBom() {
 
 TestUtf16BeBom() {
     payload := "<Source_ID>5</Source_ID>" OPEN_TAG "ZZ" CLOSE_TAG "OK"
-    expectedText := "<Source_ID>123</Source_ID>" OPEN_TAG "PLACEHOLDER" CLOSE_TAG "OK"
+    expectedText := "<Source_ID>123</Source_ID>PLACEHOLDEROK"
     input := Concat(Raw([0xFE, 0xFF]), EncodeAscii(payload, "utf-16be"))
     result := RewriteXml(input, "PLACEHOLDER", "123")
     expected := Concat(Raw([0xFE, 0xFF]), EncodeAscii(expectedText, "utf-16be"))
@@ -1029,7 +1028,7 @@ TestWindows1252Declaration() {
     expected := Concat(
         Ascii("<?xml version=`"1.0`" encoding=`"windows-1252`"?>"),
         Raw([0x93]),
-        Ascii("<Source_ID>2</Source_ID>" OPEN_TAG "PLACEHOLDER" CLOSE_TAG))
+        Ascii("<Source_ID>2</Source_ID>PLACEHOLDER"))
     AssertBuf(result.bytes, expected, "windows-1252 bytes")
     AssertTrue(result.encoding == "cp1252", "windows-1252 name")
 }
@@ -1040,9 +1039,8 @@ TestUtf8ReplacementAndHighByte() {
         Raw([0x80]))
     result := RewriteXml(input, Chr(0xE9), "1")
     expected := Concat(
-        Ascii("<?xml encoding=`"UTF-8`"?>" OPEN_TAG),
+        Ascii("<?xml encoding=`"UTF-8`"?>"),
         Raw([0xC3, 0xA9]),
-        Ascii(CLOSE_TAG),
         Raw([0x80]))
     AssertBuf(result.bytes, expected, "utf-8 e-acute")
     AssertTrue(result.encoding == "utf-8", "utf-8 name")
@@ -1084,7 +1082,7 @@ TestRawRoundTrip() {
     try FileDelete(path)
     AssertBuf(loaded, input, "raw readback")
     result := RewriteXml(loaded, "PLACEHOLDER", "8")
-    expected := Concat(Ascii(OPEN_TAG "PLACEHOLDER" CLOSE_TAG "<Source_ID>8</Source_ID>"), Raw([0xFF, 0x00]))
+    expected := Concat(Ascii("PLACEHOLDER<Source_ID>8</Source_ID>"), Raw([0xFF, 0x00]))
     AssertBuf(result.bytes, expected, "raw round trip")
 }
 
