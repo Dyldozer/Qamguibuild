@@ -38,9 +38,9 @@ The part `Content-Type` defaults to `text/xml`. Uncheck **Send part type** to se
 2. Run `QamXmlImport.ahk`.
 3. Choose the XML file and type the new Source ID (digits only).
 4. Put the real mapping text in the replacement box when you have it. Closing the window, or rewriting, saves that box to `MappingReplacement.txt`.
-5. For upload, enter the URL from the browser request. Type the username and password in Authorization. The request sends `Authorization: Basic` plus the Base64 encoding of `username:password`. If the site is already logged in, copy the request's `Cookie` and `Referer` too. Extra lines such as `X-CSRF-Token: ...` go in Extra headers, one `Name: value` per line.
+5. For upload, enter the URL and type the username and password in Authorization. The request sends `Authorization: Basic` plus the Base64 encoding of `username:password`.
 
-The URL, username, password, cookie, and the other boxes are stored in `QamXmlImport.ini` next to the script. The password and cookie are plain text. That file is not part of the project. Leave both Authorization boxes empty to send the request without that header.
+The URL, username, password, and the other boxes are stored in `QamXmlImport.ini` next to the script. The password is plain text. That file is not part of the project. Leave both Authorization boxes empty to send the request without that header.
 
 TLS certificate errors are ignored by default so a device page with a self-signed certificate still accepts the upload. Uncheck that box for a public site with a normal certificate.
 
@@ -51,7 +51,7 @@ These are the choices the script makes where the browser request was not fully s
 - The new Source ID is the number you type. It is not looked up anywhere.
 - The upload URL is the one you type.
 - The body is the rewritten XML, not a zip. The field name is `Import`. The part `Content-Type` is sent only while **Send part type** is checked.
-- A logged-in session can be supplied by the Authorization username and password, and by pasting `Cookie`, `Referer`, and any other request headers.
+- The upload is authorized with the Authorization username and password.
 - `Source_ID` numbers inside the old mapping block disappear with that block. Numbers in the new text, and numbers outside the block, are updated.
 - The opening tag must match `<QAM_Mapping view="Mappings">` exactly. The block runs through the last `</QAM_Mapping>` in the file, and both tags are part of what is replaced.
 - The file encoding can be UTF-8, UTF-16 LE, UTF-16 BE, windows-1252, or ISO-8859-1. Any other declared encoding is left byte-for-byte, and the replacement text then has to be ASCII.
