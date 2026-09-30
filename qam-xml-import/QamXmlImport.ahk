@@ -54,12 +54,6 @@ StartGui() {
     g.AddText("xm y+10", "Upload URL")
     Ui.Url := g.AddEdit("xm y+4 w718")
 
-    g.AddText("xm y+10", "Cookie (optional, copied from the browser request)")
-    Ui.Cookie := g.AddEdit("xm y+4 w718")
-
-    g.AddText("xm y+10", "Referer (optional)")
-    Ui.Referer := g.AddEdit("xm y+4 w718")
-
     g.AddText("xm y+10", "Authorization")
     g.AddText("xm y+6", "Username")
     Ui.Username := g.AddEdit("x+8 yp-2 w240")
@@ -70,10 +64,6 @@ StartGui() {
     Ui.PartType := g.AddEdit("x+8 yp-2 w160", DEFAULT_PART_TYPE)
     Ui.SendPartType := g.AddCheckbox("x+12 yp+2 Checked", "Send part type")
     Ui.IgnoreTls := g.AddCheckbox("x+12 yp", "Ignore TLS certificate errors")
-
-    g.AddText("xm y+10", "Extra headers (optional, one Name: value per line)")
-    Ui.Headers := g.AddEdit("xm y+4 w718 r3 Multi")
-    SendMessage(0xC5, 1000000, 0, Ui.Headers.Hwnd)
 
     g.AddText("xm y+10", "Text that replaces the QAM_Mapping block, including both tags")
     Ui.Replacement := g.AddEdit("xm y+4 w718 r5 Multi WantReturn")
@@ -92,17 +82,14 @@ StartGui() {
     Ui.SourceId.Value := saved.SourceId
     Ui.UploadName.Value := saved.UploadName
     Ui.Url.Value := saved.Url
-    Ui.Cookie.Value := saved.Cookie
-    Ui.Referer.Value := saved.Referer
     Ui.Username.Value := saved.Username
     Ui.Password.Value := saved.Password
     Ui.PartType.Value := saved.PartType
     Ui.SendPartType.Value := saved.SendPartType
     Ui.IgnoreTls.Value := saved.IgnoreTls
-    Ui.Headers.Value := ToEditNewlines(saved.ExtraHeaders)
     Ui.Replacement.Value := ToEditNewlines(saved.Replacement)
 
-    g.Show("w760 h790")
+    g.Show("w760 h640")
 }
 
 CloseGui(*) {
@@ -178,10 +165,6 @@ RunJob(doUpload) {
             return
 
         Log(form.Disposition)
-        if (form.Cookie != "")
-            Log("Cookie: (set)")
-        else
-            Log("Cookie: (none)")
         if (AuthorizationHeader(form.Username, form.Password) != "")
             Log("Authorization: Basic (set)")
         else
@@ -210,7 +193,7 @@ RunJob(doUpload) {
 
 SetBusy(busy) {
     global Ui
-    names := ["Xml", "SourceId", "UploadName", "Url", "Cookie", "Referer", "Username", "Password", "PartType", "Headers", "Replacement", "IgnoreTls", "SendPartType", "RewriteBtn", "UploadBtn", "BrowseBtn"]
+    names := ["Xml", "SourceId", "UploadName", "Url", "Username", "Password", "PartType", "Replacement", "IgnoreTls", "SendPartType", "RewriteBtn", "UploadBtn", "BrowseBtn"]
     for name in names {
         ctrl := Ui.%name%
         if (IsObject(ctrl))
@@ -227,14 +210,11 @@ CollectForm() {
         SourceId: Trim(Ui.SourceId.Value),
         UploadName: Trim(Ui.UploadName.Value),
         Url: Trim(Ui.Url.Value),
-        Cookie: Trim(Ui.Cookie.Value, " `t`r`n"),
-        Referer: Trim(Ui.Referer.Value),
         Username: CleanCredential(Ui.Username.Value, true),
         Password: CleanCredential(Ui.Password.Value, false),
         PartType: partType,
         SendPartType: sendPartType,
         IgnoreTls: Ui.IgnoreTls.Value ? true : false,
-        ExtraHeaders: ToEditNewlines(Ui.Headers.Value),
         Replacement: ToEditNewlines(Ui.Replacement.Value),
         Disposition: ""
     }
@@ -808,11 +788,6 @@ PostImport(form, fileBytes) {
         try whr.Option[9] := 0x800
     whr.SetRequestHeader("User-Agent", BROWSER_UA)
     whr.SetRequestHeader("Content-Type", "multipart/form-data; boundary=" packed.boundary)
-    if (form.Cookie != "")
-        whr.SetRequestHeader("Cookie", form.Cookie)
-    if (form.Referer != "")
-        whr.SetRequestHeader("Referer", form.Referer)
-    ApplyExtraHeaders(whr, form.ExtraHeaders)
     auth := AuthorizationHeader(form.Username, form.Password)
     if (auth != "")
         whr.SetRequestHeader("Authorization", auth)
@@ -846,27 +821,6 @@ PostImport(form, fileBytes) {
     }
 }
 
-ApplyExtraHeaders(whr, text) {
-    for line in StrSplit(text, "`n", "`r") {
-        line := Trim(line)
-        if (line == "")
-            continue
-        pos := InStr(line, ":")
-        if (pos < 2)
-            throw Error("Extra header must look like Name: value. Got: " line)
-        name := Trim(SubStr(line, 1, pos - 1))
-        value := Trim(SubStr(line, pos + 1))
-        if (name == "" || value == "")
-            throw Error("Extra header must look like Name: value. Got: " line)
-        blocked := StrLower(name)
-        if (blocked == "content-type" || blocked == "content-length" || blocked == "host")
-            throw Error("The " name " header is set by the upload itself.")
-        if (blocked == "authorization")
-            throw Error("Put the username and password in the Authorization boxes.")
-        whr.SetRequestHeader(name, value)
-    }
-}
-
 BufferToSafeArray(buf) {
     arr := ComObjArray(0x11, buf.Size) ; VT_UI1
     if (buf.Size) {
@@ -893,30 +847,20 @@ ReplacementPath() {
     return A_ScriptDir "\MappingReplacement.txt"
 }
 
-ExtraHeadersPath() {
-    return A_ScriptDir "\ExtraHeaders.txt"
-}
-
 LoadSettings() {
     replacement := DEFAULT_REPLACEMENT
     if (FileExist(ReplacementPath()))
         replacement := FileRead(ReplacementPath(), "UTF-8")
-    headers := ""
-    if (FileExist(ExtraHeadersPath()))
-        headers := FileRead(ExtraHeadersPath(), "UTF-8")
     return {
         XmlPath: ReadIni("XmlPath", ""),
         SourceId: ReadIni("SourceId", ""),
         UploadName: ReadIni("UploadName", ""),
         Url: ReadIni("Url", ""),
-        Cookie: ReadIni("Cookie", ""),
-        Referer: ReadIni("Referer", ""),
         Username: ReadIni("Username", ""),
         Password: ReadIni("Password", ""),
         PartType: ReadIni("PartType", DEFAULT_PART_TYPE),
         SendPartType: ReadIni("SendPartType", "1") != "0",
         IgnoreTls: ReadIni("IgnoreTls", "1") != "0",
-        ExtraHeaders: headers,
         Replacement: replacement
     }
 }
@@ -936,14 +880,11 @@ SaveSettings(form) {
     WriteIni("SourceId", form.SourceId)
     WriteIni("UploadName", form.UploadName)
     WriteIni("Url", form.Url)
-    WriteIni("Cookie", form.Cookie)
-    WriteIni("Referer", form.Referer)
     WriteIni("Username", form.Username)
     WriteIni("Password", form.Password)
     WriteIni("PartType", form.PartType == "" ? DEFAULT_PART_TYPE : form.PartType)
     WriteIni("SendPartType", form.SendPartType ? "1" : "0")
     WriteIni("IgnoreTls", form.IgnoreTls ? "1" : "0")
-    WriteTextIfChanged(ExtraHeadersPath(), form.ExtraHeaders)
     WriteTextIfChanged(ReplacementPath(), form.Replacement)
 }
 
