@@ -3,7 +3,7 @@
 
 ; Include UIA library if available (place UIA.ahk in Lib folder or same directory)
 ; Download from: https://github.com/Descolada/UIA-v2
-#Include <UIA>
+#Include UIA.ahk
 
 ; Include save/load functionality
 #Include "ChannelSetIO.ahk"
@@ -18,24 +18,13 @@ global ProgramChannelMap := Map()
 global CurrentCheckedRow := 0
 global CheckedChannel := ""
 
-; GUI Controls references
-global MainGui := ""
-global LV := ""
-global LoadBtn := ""
-global ConfigBtn := ""
-global SearchEdit := ""
-
-; Initialize and show GUI
-Main()
-
-Main() {
     global MainGui, LV, LoadBtn, ConfigBtn, ChannelSets
     
     ; Load INI settings
     LoadINISettings()
     
     ; Create main GUI
-    MainGui := Gui("+Resize", "Channel Mapper")
+    MainGui := Gui("+Resize", "Vecima Channel Mapper")
     MainGui.SetFont("s9", "Segoe UI")
     MainGui.OnEvent("Close", (*) => ExitApp())
     MainGui.OnEvent("Size", GuiResize)
@@ -84,7 +73,7 @@ Main() {
     GetLocalsBtn.OnEvent("Click", SuggestLocalMatches)
     
     ; Right panel - 60 channel sets (4 columns x 15 rows)
-    MainGui.AddText("x420 y5 w700 h20 Center", "Channel Assignment Sets")
+    MainGui.AddText("x420 y5 w700 h20 Center", "Channel Map")
     
     ; Create 60 sets of edit boxes
     startX := 420
@@ -116,7 +105,7 @@ Main() {
     
     ; Show GUI
     MainGui.Show("w1130 h760")
-}
+
 
 CreateChannelSet(index, x, y, width, height) {
     global MainGui, ChannelSets

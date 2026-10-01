@@ -319,8 +319,8 @@ BuildLocalSuggestions(channels, locals) {
     result.Skipped := []
     bySet := Map()
 
-    for local in locals {
-        parsed := ParseLocalEntry(local)
+    for localx in locals {
+        parsed := ParseLocalEntry(localx)
         if (!IsObject(parsed))
             continue
 
@@ -385,8 +385,8 @@ BuildLocalSuggestions(channels, locals) {
 
 CountUsableLocals(locals) {
     count := 0
-    for local in locals {
-        if (IsObject(ParseLocalEntry(local)))
+    for localx in locals {
+        if (IsObject(ParseLocalEntry(localx)))
             count++
     }
     return count
